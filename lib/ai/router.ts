@@ -241,7 +241,7 @@ async function callOpenAICompatible({
   return text;
 }
 
-function classifyLocally(userPrompt: string, hasImage: boolean): string {
+export function classifyLocally(userPrompt: string, hasImage: boolean): string {
   const norm = userPrompt
     .toLowerCase()
     .normalize('NFD')

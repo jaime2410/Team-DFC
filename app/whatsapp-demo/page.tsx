@@ -155,7 +155,7 @@ export default function WhatsAppDemoPage() {
                       image: {
                         id: 'demo-image-id',
                         mime_type: 'image/jpeg',
-                        caption: t('whatsappDemo.photoLabel'),
+                        caption: '',
                       },
                     })
                   }
