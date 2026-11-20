@@ -1,0 +1,28 @@
+{
+  "appName": "AlmeríaCerca",
+  "appTagline": "بلديتك على بُعد رسالة واحدة",
+  "nav": {
+    "home": "الرئيسية",
+    "municipalityLabel": "البلدية",
+    "languageLabel": "اللغة",
+    "accessibility": "إمكانية الوصول",
+    "largeText": "نص كبير (A+)",
+    "highContrast": "تباين عالٍ",
+    "easyRead": "قراءة سهلة",
+    "loginOrProfile": "دخول / ملفي",
+    "adminPanel": "لوحة الإدارة",
+    "closeMenu": "إغلاق"
+  },
+  "phase0": {
+    "badge": "البلدية النشطة",
+    "welcomeTitle": "مرحباً بكم في {municipality}",
+    "welcomeSubtitle": "قناتك المباشرة والبسيطة مع بلدية {municipality} ({province}). يمكنك تغيير البلدية أو اللغة أو تفعيل أدوات المساعدة البصرية من الأعلى في أي وقت.",
+    "streetsTitle": "الشوارع المسجلة في هذه البلدية",
+    "statusTitle": "حالة اللغة وإمكانية الوصول",
+    "langActive": "اللغة النشطة",
+    "directionActive": "اتجاه النص",
+    "a11yActive": "الأوضاع النشطة",
+    "a11yNone": "قياسي",
+    "dbReady": "قاعدة البيانات متعددة البلديات جاهزة"
+  }
+}

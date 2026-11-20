@@ -1,0 +1,28 @@
+{
+  "appName": "AlmeríaCerca",
+  "appTagline": "Your Town Hall, one message away",
+  "nav": {
+    "home": "Home",
+    "municipalityLabel": "Town",
+    "languageLabel": "Language",
+    "accessibility": "Accessibility",
+    "largeText": "Large text (A+)",
+    "highContrast": "High contrast",
+    "easyRead": "Easy read",
+    "loginOrProfile": "Sign in / My Profile",
+    "adminPanel": "Admin Panel",
+    "closeMenu": "Close"
+  },
+  "phase0": {
+    "badge": "Active municipality",
+    "welcomeTitle": "Welcome to {municipality}",
+    "welcomeSubtitle": "Your direct and simple channel with the Town Hall of {municipality} ({province}). Switch town, language, or visual aids at the top anytime.",
+    "streetsTitle": "Configured streets in this town",
+    "statusTitle": "Accessibility & language status",
+    "langActive": "Active language",
+    "directionActive": "Text direction",
+    "a11yActive": "Active modes",
+    "a11yNone": "Standard",
+    "dbReady": "Multi-town database ready"
+  }
+}

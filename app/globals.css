@@ -1,0 +1,73 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --bg-arena: #F7F1E5;
+  --bg-superficie: #EFE5D3;
+  --bg-tarjeta: #FFFDF8;
+  --color-terracota: #E45735;
+  --color-verde-cabo: #1B8A7A;
+  --color-sol: #F2B84B;
+  --color-azul-med: #2C6E91;
+  --color-buganvilla: #B84A62;
+  --color-tinta: #1E242B;
+}
+
+html,
+body {
+  background-color: var(--bg-arena);
+  color: var(--color-tinta);
+  overflow-x: hidden;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Accesibilidad 1: Texto Grande */
+html.a11y-large-text {
+  font-size: 118%;
+}
+
+html.a11y-large-text body {
+  line-height: 1.65;
+}
+
+/* Accesibilidad 2: Alto Contraste */
+html.a11y-high-contrast body {
+  background-color: #EFE5D3;
+  color: #0D1117;
+}
+
+html.a11y-high-contrast .a11y-card,
+html.a11y-high-contrast header,
+html.a11y-high-contrast main section,
+html.a11y-high-contrast button,
+html.a11y-high-contrast select,
+html.a11y-high-contrast input,
+html.a11y-high-contrast textarea {
+  border-color: #1E242B !important;
+  border-width: 2px !important;
+}
+
+html.a11y-high-contrast *:focus-visible {
+  outline: 3px solid #1E242B !important;
+  outline-offset: 2px;
+}
+
+/* Accesibilidad 3: Modo Lectura Fácil */
+html.a11y-easy-read body {
+  line-height: 1.8 !important;
+  letter-spacing: 0.02em;
+  word-spacing: 0.08em;
+}
+
+html.a11y-easy-read p,
+html.a11y-easy-read li,
+html.a11y-easy-read span,
+html.a11y-easy-read label {
+  line-height: 1.8 !important;
+}
+
+html.a11y-easy-read .a11y-card {
+  box-shadow: none !important;
+  border-width: 2px !important;
+}

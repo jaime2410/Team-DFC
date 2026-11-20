@@ -1,0 +1,28 @@
+{
+  "appName": "AlmeríaCerca",
+  "appTagline": "Tu Ayuntamiento, a un mensaje",
+  "nav": {
+    "home": "Inicio",
+    "municipalityLabel": "Municipio",
+    "languageLabel": "Idioma",
+    "accessibility": "Accesibilidad",
+    "largeText": "Texto grande (A+)",
+    "highContrast": "Alto contraste",
+    "easyRead": "Lectura fácil",
+    "loginOrProfile": "Entrar / Mi Perfil",
+    "adminPanel": "Panel Admin",
+    "closeMenu": "Cerrar"
+  },
+  "phase0": {
+    "badge": "Municipio activo",
+    "welcomeTitle": "Bienvenido a {municipality}",
+    "welcomeSubtitle": "Tu canal directo y sencillo con el Ayuntamiento de {municipality} ({province}). Cambia de pueblo, idioma o activa las ayudas visuales arriba en cualquier momento.",
+    "streetsTitle": "Calles configuradas en este municipio",
+    "statusTitle": "Estado de accesibilidad e idioma",
+    "langActive": "Idioma activo",
+    "directionActive": "Dirección del texto",
+    "a11yActive": "Modos activos",
+    "a11yNone": "Estándar",
+    "dbReady": "Base de datos multi-municipio lista"
+  }
+}

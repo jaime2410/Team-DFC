@@ -1,0 +1,28 @@
+{
+  "appName": "AlmeríaCerca",
+  "appTagline": "Votre mairie, à portée de message",
+  "nav": {
+    "home": "Accueil",
+    "municipalityLabel": "Commune",
+    "languageLabel": "Langue",
+    "accessibility": "Accessibilité",
+    "largeText": "Grand texte (A+)",
+    "highContrast": "Contraste élevé",
+    "easyRead": "Lecture facile",
+    "loginOrProfile": "Connexion / Mon Profil",
+    "adminPanel": "Panneau Admin",
+    "closeMenu": "Fermer"
+  },
+  "phase0": {
+    "badge": "Commune active",
+    "welcomeTitle": "Bienvenue à {municipality}",
+    "welcomeSubtitle": "Votre canal direct et simple avec la Mairie de {municipality} ({province}). Changez de commune, de langue ou activez les aides visuelles ci-dessus.",
+    "streetsTitle": "Rues configurées dans cette commune",
+    "statusTitle": "État d'accessibilité et de langue",
+    "langActive": "Langue active",
+    "directionActive": "Sens du texte",
+    "a11yActive": "Modes actifs",
+    "a11yNone": "Standard",
+    "dbReady": "Base de données multi-communes prête"
+  }
+}
