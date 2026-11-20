@@ -105,25 +105,24 @@ export async function checkFaqCache(
   }
 
   const db = await getDb();
-  const municipality = resolveMunicipality(db, municipalityId);
+  const municipality = await resolveMunicipality(db, municipalityId);
   if (!municipality) {
     return { hit: false, normalizedQuestion };
   }
 
-  const row = db
-    .prepare(
-      `SELECT id, answer, hits
-       FROM faq_cache
-       WHERE municipality_id = ? AND normalized_question = ? AND lang = ?
-       LIMIT 1`
-    )
-    .get(municipality.id, normalizedQuestion, lang) as FaqRow | undefined;
+  const row = await db.queryOne<FaqRow>(
+    `SELECT id, answer, hits
+     FROM faq_cache
+     WHERE municipality_id = $1 AND normalized_question = $2 AND lang = $3
+     LIMIT 1`,
+    [municipality.id, normalizedQuestion, lang]
+  );
 
   if (!row) {
     return { hit: false, normalizedQuestion };
   }
 
-  db.prepare(`UPDATE faq_cache SET hits = hits + 1 WHERE id = ?`).run(row.id);
+  await db.execute(`UPDATE faq_cache SET hits = hits + 1 WHERE id = $1`, [row.id]);
 
   return {
     hit: true,
@@ -144,15 +143,16 @@ export async function saveFaqCache(
   if (!normalizedQuestion || !cleanAnswer) return;
 
   const db = await getDb();
-  const municipality = resolveMunicipality(db, municipalityId);
+  const municipality = await resolveMunicipality(db, municipalityId);
   if (!municipality) return;
 
-  db.prepare(
+  await db.execute(
     `INSERT INTO faq_cache (id, municipality_id, normalized_question, lang, answer, hits)
-     VALUES (?, ?, ?, ?, ?, 1)
+     VALUES ($1, $2, $3, $4, $5, 1)
      ON CONFLICT (municipality_id, normalized_question, lang)
-     DO UPDATE SET answer = excluded.answer`
-  ).run(`faq-${crypto.randomUUID()}`, municipality.id, normalizedQuestion, lang, cleanAnswer);
+     DO UPDATE SET answer = EXCLUDED.answer`,
+    [`faq-${crypto.randomUUID()}`, municipality.id, normalizedQuestion, lang, cleanAnswer]
+  );
 }
 
 export async function detectZeroTokenIntent(
@@ -161,7 +161,7 @@ export async function detectZeroTokenIntent(
   lang = 'es'
 ): Promise<ZeroTokenIntentResult> {
   const db = await getDb();
-  const municipality = resolveMunicipality(db, municipalityId);
+  const municipality = await resolveMunicipality(db, municipalityId);
   if (!municipality) {
     return { matched: false };
   }
@@ -170,14 +170,13 @@ export async function detectZeroTokenIntent(
   const codeMatch = message.match(/\b(SOL-\d+)\b/i);
   if (codeMatch) {
     const code = codeMatch[1].toUpperCase();
-    const incident = db
-      .prepare(
-        `SELECT tracking_code, title, status, department, address_label, urgency, internal_notes
-         FROM incidents
-         WHERE UPPER(tracking_code) = ? AND municipality_id = ?
-         LIMIT 1`
-      )
-      .get(code, municipality.id) as IncidentLookupRow | undefined;
+    const incident = await db.queryOne<IncidentLookupRow>(
+      `SELECT tracking_code, title, status, department, address_label, urgency, internal_notes
+       FROM incidents
+       WHERE UPPER(tracking_code) = $1 AND municipality_id = $2
+       LIMIT 1`,
+      [code, municipality.id]
+    );
 
     if (!incident) {
       const notFoundMap: Record<string, string> = {

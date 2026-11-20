@@ -66,123 +66,79 @@ function splitWordsIntoChunks(text: string, wordsPerChunk = 350, overlap = 40): 
   return chunks;
 }
 
-function populateDatabase(db: DbClient): void {
+async function populateDatabase(db: DbClient): Promise<void> {
   const passwordHash = bcrypt.hashSync('1234', 10);
 
-  const insertMunicipality = db.prepare(`
-    INSERT INTO municipalities (id, slug, name, province, center_lat, center_lng, streets_json, whatsapp_phone_id)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-  `);
-
-  const insertUser = db.prepare(`
-    INSERT INTO users (id, municipality_id, email, password_hash, name, role, department_name, preferred_lang)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-  `);
-
-  const insertProfile = db.prepare(`
-    INSERT INTO citizen_profiles (
-      user_id, municipality_id, street_name, neighborhood, household_size,
-      has_children, large_family, has_seniors_or_dependents, reduced_mobility,
-      income_bracket, interests_json, whatsapp_phone, notifications_opt_in
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-  `);
-
-  const insertIncident = db.prepare(`
-    INSERT INTO incidents (
-      id, municipality_id, user_id, tracking_code, title, description,
-      lat, lng, address_label, category, urgency, department, status,
-      ai_reasoning, ai_provider_used, channel, upvotes, internal_notes, created_at, updated_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-  `);
-
-  const insertAid = db.prepare(`
-    INSERT INTO municipal_aids (
-      id, municipality_id, title, description, discount_label, requirements_json, deadline, apply_url, active
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1)
-  `);
-
-  const insertAlert = db.prepare(`
-    INSERT INTO street_alerts (
-      id, municipality_id, title, message, affected_streets_json, start_date, end_date, severity
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-  `);
-
-  const insertRagDoc = db.prepare(`
-    INSERT INTO rag_documents (id, municipality_id, filename, doc_type, char_count, chunk_count, uploaded_by)
-    VALUES (?, ?, ?, ?, ?, ?, ?)
-  `);
-
-  const insertRagChunk = db.prepare(`
-    INSERT INTO rag_chunks (chunk_id, document_id, municipality_id, filename, content)
-    VALUES (?, ?, ?, ?, ?)
-  `);
-
-  const insertRagFts = db.prepare(`
-    INSERT INTO rag_chunks_fts (chunk_id, document_id, municipality_id, filename, content)
-    VALUES (?, ?, ?, ?, ?)
-  `);
-
-  const insertProviderKey = db.prepare(`
-    INSERT INTO ai_provider_keys (id, municipality_id, provider, api_key, base_url, enabled)
-    VALUES (?, ?, ?, ?, ?, ?)
-  `);
-
-  const insertAiConfig = db.prepare(`
-    INSERT INTO ai_configs (id, municipality_id, feature_key, primary_provider, primary_model, backups_json, max_tokens, temperature)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-  `);
-
   for (const m of MUNICIPALITIES) {
-    insertMunicipality.run(
-      m.id,
-      m.slug,
-      m.name,
-      m.province,
-      m.centerLat,
-      m.centerLng,
-      JSON.stringify(m.streets),
-      m.whatsappPhoneId
+    await db.execute(
+      `INSERT INTO municipalities (id, slug, name, province, center_lat, center_lng, streets_json, whatsapp_phone_id)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+      [
+        m.id,
+        m.slug,
+        m.name,
+        m.province,
+        m.centerLat,
+        m.centerLng,
+        JSON.stringify(m.streets),
+        m.whatsappPhoneId,
+      ]
     );
 
     const adminId = `user-admin-${m.slug}`;
     const citizenId = `user-vecino-${m.slug}`;
 
-    insertUser.run(
-      adminId,
-      m.id,
-      `admin@${m.slug}.es`,
-      passwordHash,
-      `Ayuntamiento de ${m.name}`,
-      'ADMIN',
-      'Alcaldía y Gestión Municipal',
-      'es'
+    await db.execute(
+      `INSERT INTO users (id, municipality_id, email, password_hash, name, role, department_name, preferred_lang)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+      [
+        adminId,
+        m.id,
+        `admin@${m.slug}.es`,
+        passwordHash,
+        `Ayuntamiento de ${m.name}`,
+        'ADMIN',
+        'Alcaldía y Gestión Municipal',
+        'es',
+      ]
     );
 
-    insertUser.run(
-      citizenId,
-      m.id,
-      `vecino@${m.slug}.es`,
-      passwordHash,
-      m.slug === 'lucainena' ? 'María López García' : 'Antonio Ruiz Martín',
-      'CITIZEN',
-      null,
-      'es'
+    await db.execute(
+      `INSERT INTO users (id, municipality_id, email, password_hash, name, role, department_name, preferred_lang)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+      [
+        citizenId,
+        m.id,
+        `vecino@${m.slug}.es`,
+        passwordHash,
+        m.slug === 'lucainena' ? 'María López García' : 'Antonio Ruiz Martín',
+        'CITIZEN',
+        null,
+        'es',
+      ]
     );
 
-    insertProfile.run(
-      citizenId,
-      m.id,
-      m.streets[2],
-      'Centro',
-      2,
-      0,
-      0,
-      0,
-      0,
-      'MEDIUM',
-      JSON.stringify(['ayudas', 'cultura', 'obras']),
-      m.slug === 'lucainena' ? '+34600112233' : '+34600445566',
-      1
+    await db.execute(
+      `INSERT INTO citizen_profiles (
+         user_id, municipality_id, street_name, neighborhood, household_size,
+         has_children, large_family, has_seniors_or_dependents, reduced_mobility,
+         income_bracket, interests_json, whatsapp_phone, notifications_opt_in
+       ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)`,
+      [
+        citizenId,
+        m.id,
+        m.streets[2],
+        'Centro',
+        2,
+        0,
+        0,
+        0,
+        0,
+        'MEDIUM',
+        JSON.stringify(['ayudas', 'cultura', 'obras']),
+        m.slug === 'lucainena' ? '+34600112233' : '+34600445566',
+        1,
+      ]
     );
 
     const incidentTemplates = [
@@ -308,32 +264,40 @@ function populateDatabase(db: DbClient): void {
       },
     ];
 
-    incidentTemplates.forEach((inc, idx) => {
+    for (let idx = 0; idx < incidentTemplates.length; idx++) {
+      const inc = incidentTemplates[idx];
       const code = `SOL-${m.codePrefix + idx + 1}`;
       const createdAt = new Date(Date.now() - inc.daysAgo * 86400000).toISOString();
-      insertIncident.run(
-        `inc-${m.slug}-${idx + 1}`,
-        m.id,
-        idx < 2 ? citizenId : null,
-        code,
-        inc.title,
-        inc.description,
-        Number((m.centerLat + inc.latOff).toFixed(6)),
-        Number((m.centerLng + inc.lngOff).toFixed(6)),
-        inc.street,
-        inc.category,
-        inc.urgency,
-        inc.department,
-        inc.status,
-        inc.reasoning,
-        'LOCAL',
-        idx % 4 === 3 ? 'WHATSAPP' : 'WEB',
-        inc.upvotes,
-        inc.notes,
-        createdAt,
-        createdAt
+      await db.execute(
+        `INSERT INTO incidents (
+           id, municipality_id, user_id, tracking_code, title, description,
+           lat, lng, address_label, category, urgency, department, status,
+           ai_reasoning, ai_provider_used, channel, upvotes, internal_notes, created_at, updated_at
+         ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20)`,
+        [
+          `inc-${m.slug}-${idx + 1}`,
+          m.id,
+          idx < 2 ? citizenId : null,
+          code,
+          inc.title,
+          inc.description,
+          Number((m.centerLat + inc.latOff).toFixed(6)),
+          Number((m.centerLng + inc.lngOff).toFixed(6)),
+          inc.street,
+          inc.category,
+          inc.urgency,
+          inc.department,
+          inc.status,
+          inc.reasoning,
+          'LOCAL',
+          idx % 4 === 3 ? 'WHATSAPP' : 'WEB',
+          inc.upvotes,
+          inc.notes,
+          createdAt,
+          createdAt,
+        ]
       );
-    });
+    }
 
     const aids = [
       {
@@ -386,18 +350,24 @@ function populateDatabase(db: DbClient): void {
       },
     ];
 
-    aids.forEach((aid, idx) => {
-      insertAid.run(
-        `aid-${m.slug}-${idx + 1}`,
-        m.id,
-        aid.title,
-        aid.description,
-        aid.discount,
-        JSON.stringify(aid.reqs),
-        aid.deadline,
-        `/asistente?q=${encodeURIComponent(`Cómo solicitar ${aid.title}`)}`
+    for (let idx = 0; idx < aids.length; idx++) {
+      const aid = aids[idx];
+      await db.execute(
+        `INSERT INTO municipal_aids (
+           id, municipality_id, title, description, discount_label, requirements_json, deadline, apply_url, active
+         ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 1)`,
+        [
+          `aid-${m.slug}-${idx + 1}`,
+          m.id,
+          aid.title,
+          aid.description,
+          aid.discount,
+          JSON.stringify(aid.reqs),
+          aid.deadline,
+          `/asistente?q=${encodeURIComponent(`Cómo solicitar ${aid.title}`)}`,
+        ]
       );
-    });
+    }
 
     const featuredAlertStreet = m.slug === 'nijar' ? m.streets[2] : m.streets[0];
     const alerts = [
@@ -427,18 +397,24 @@ function populateDatabase(db: DbClient): void {
       },
     ];
 
-    alerts.forEach((alert, idx) => {
-      insertAlert.run(
-        `alert-${m.slug}-${idx + 1}`,
-        m.id,
-        alert.title,
-        alert.message,
-        JSON.stringify(alert.streets),
-        alert.start,
-        alert.end,
-        alert.severity
+    for (let idx = 0; idx < alerts.length; idx++) {
+      const alert = alerts[idx];
+      await db.execute(
+        `INSERT INTO street_alerts (
+           id, municipality_id, title, message, affected_streets_json, start_date, end_date, severity
+         ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+        [
+          `alert-${m.slug}-${idx + 1}`,
+          m.id,
+          alert.title,
+          alert.message,
+          JSON.stringify(alert.streets),
+          alert.start,
+          alert.end,
+          alert.severity,
+        ]
       );
-    });
+    }
 
     const docs = [
       {
@@ -465,24 +441,30 @@ La basura orgánica debe depositarse entre las 20:00 y las 23:00 horas en los co
       },
     ];
 
-    docs.forEach((doc, idx) => {
+    for (let idx = 0; idx < docs.length; idx++) {
+      const doc = docs[idx];
       const docId = `doc-${m.slug}-${idx + 1}`;
       const chunks = splitWordsIntoChunks(doc.content, 350, 40);
-      insertRagDoc.run(
-        docId,
-        m.id,
-        doc.filename,
-        doc.docType,
-        doc.content.length,
-        chunks.length,
-        adminId
+      await db.execute(
+        `INSERT INTO rag_documents (id, municipality_id, filename, doc_type, char_count, chunk_count, uploaded_by)
+         VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+        [docId, m.id, doc.filename, doc.docType, doc.content.length, chunks.length, adminId]
       );
-      chunks.forEach((chunkText, cIdx) => {
+      for (let cIdx = 0; cIdx < chunks.length; cIdx++) {
         const chunkId = `${docId}-c${cIdx + 1}`;
-        insertRagChunk.run(chunkId, docId, m.id, doc.filename, chunkText);
-        insertRagFts.run(chunkId, docId, m.id, doc.filename, chunkText);
-      });
-    });
+        const chunkText = chunks[cIdx];
+        await db.execute(
+          `INSERT INTO rag_chunks (chunk_id, document_id, municipality_id, filename, content)
+           VALUES ($1, $2, $3, $4, $5)`,
+          [chunkId, docId, m.id, doc.filename, chunkText]
+        );
+        await db.execute(
+          `INSERT INTO rag_chunks_fts (chunk_id, document_id, municipality_id, filename, content)
+           VALUES ($1, $2, $3, $4, $5)`,
+          [chunkId, docId, m.id, doc.filename, chunkText]
+        );
+      }
+    }
 
     const providers = [
       { provider: 'LOCAL', baseUrl: '', enabled: 1 },
@@ -493,13 +475,10 @@ La basura orgánica debe depositarse entre las 20:00 y las 23:00 horas en los co
     ];
 
     for (const p of providers) {
-      insertProviderKey.run(
-        `key-${m.slug}-${p.provider.toLowerCase()}`,
-        m.id,
-        p.provider,
-        '',
-        p.baseUrl,
-        p.enabled
+      await db.execute(
+        `INSERT INTO ai_provider_keys (id, municipality_id, provider, api_key, base_url, enabled)
+         VALUES ($1, $2, $3, $4, $5, $6)`,
+        [`key-${m.slug}-${p.provider.toLowerCase()}`, m.id, p.provider, '', p.baseUrl, p.enabled]
       );
     }
 
@@ -540,50 +519,56 @@ La basura orgánica debe depositarse entre las 20:00 y las 23:00 horas en los co
     ];
 
     for (const cfg of aiFeatureDefaults) {
-      insertAiConfig.run(
-        `cfg-${m.slug}-${cfg.feature.toLowerCase()}`,
-        m.id,
-        cfg.feature,
-        cfg.primaryProvider,
-        cfg.primaryModel,
-        JSON.stringify(cfg.backups),
-        cfg.maxTokens,
-        cfg.temperature
+      await db.execute(
+        `INSERT INTO ai_configs (id, municipality_id, feature_key, primary_provider, primary_model, backups_json, max_tokens, temperature)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+        [
+          `cfg-${m.slug}-${cfg.feature.toLowerCase()}`,
+          m.id,
+          cfg.feature,
+          cfg.primaryProvider,
+          cfg.primaryModel,
+          JSON.stringify(cfg.backups),
+          cfg.maxTokens,
+          cfg.temperature,
+        ]
       );
     }
   }
 }
 
-export function seedDatabase(db: DbClient): void {
-  const existing = db.prepare('SELECT COUNT(*) AS cnt FROM municipalities').get() as { cnt: number };
-  if (existing.cnt > 0) {
+export async function seedDatabase(db: DbClient): Promise<void> {
+  const existing = await db.queryOne<{ cnt: number }>(
+    'SELECT COUNT(*)::int AS cnt FROM municipalities'
+  );
+  if ((existing?.cnt ?? 0) > 0) {
     return;
   }
-  const tx = db.transaction(() => {
-    populateDatabase(db);
+  await db.withTransaction(async (tx) => {
+    const insideCheck = await tx.queryOne<{ cnt: number }>(
+      'SELECT COUNT(*)::int AS cnt FROM municipalities'
+    );
+    if ((insideCheck?.cnt ?? 0) > 0) return;
+    await populateDatabase(tx);
   });
-  tx();
 }
 
-export function resetDatabase(db: DbClient): void {
-  const tx = db.transaction(() => {
-    db.exec(`
-      DELETE FROM faq_cache;
-      DELETE FROM user_notifications;
-      DELETE FROM street_alerts;
-      DELETE FROM municipal_aids;
-      DELETE FROM ai_configs;
-      DELETE FROM ai_provider_keys;
-      DELETE FROM rag_chunks_fts;
-      DELETE FROM rag_chunks;
-      DELETE FROM rag_documents;
-      DELETE FROM consultations;
-      DELETE FROM incidents;
-      DELETE FROM citizen_profiles;
-      DELETE FROM users;
-      DELETE FROM municipalities;
-    `);
-    populateDatabase(db);
+export async function resetDatabase(db: DbClient): Promise<void> {
+  await db.withTransaction(async (tx) => {
+    await tx.execute('DELETE FROM faq_cache');
+    await tx.execute('DELETE FROM user_notifications');
+    await tx.execute('DELETE FROM street_alerts');
+    await tx.execute('DELETE FROM municipal_aids');
+    await tx.execute('DELETE FROM ai_configs');
+    await tx.execute('DELETE FROM ai_provider_keys');
+    await tx.execute('DELETE FROM rag_chunks_fts');
+    await tx.execute('DELETE FROM rag_chunks');
+    await tx.execute('DELETE FROM rag_documents');
+    await tx.execute('DELETE FROM consultations');
+    await tx.execute('DELETE FROM incidents');
+    await tx.execute('DELETE FROM citizen_profiles');
+    await tx.execute('DELETE FROM users');
+    await tx.execute('DELETE FROM municipalities');
+    await populateDatabase(tx);
   });
-  tx();
 }

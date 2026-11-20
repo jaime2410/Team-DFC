@@ -64,7 +64,7 @@ export function isValidCoordinate(lat: unknown, lng: unknown): lat is number {
 
 export async function createIncident(input: CreateIncidentInput): Promise<CreatedIncident> {
   const db = await getDb();
-  const municipality = resolveMunicipality(db, input.municipalityId);
+  const municipality = await resolveMunicipality(db, input.municipalityId);
   if (!municipality) throw new IncidentInputError('Municipio no encontrado.');
 
   const description = input.description.trim().slice(0, 1000);
@@ -93,41 +93,40 @@ export async function createIncident(input: CreateIncidentInput): Promise<Create
     categoryHint: input.categoryHint,
   });
 
-  const maxRow = db
-    .prepare(
-      `SELECT MAX(CAST(SUBSTR(tracking_code, 5) AS INTEGER)) AS max_code
-       FROM incidents WHERE tracking_code LIKE 'SOL-%'`
-    )
-    .get() as { max_code: number | null } | undefined;
+  const maxRow = await db.queryOne<{ max_code: number | null }>(
+    `SELECT COALESCE(MAX(CAST(SUBSTR(tracking_code, 5) AS INTEGER)), 0)::int AS max_code
+     FROM incidents WHERE tracking_code ~ '^SOL-[0-9]+$'`
+  );
   const trackingCode = `SOL-${(maxRow?.max_code ?? 0) + 1}`;
 
   const id = `inc-${crypto.randomUUID()}`;
   const channel = input.channel === 'WHATSAPP' ? 'WHATSAPP' : 'WEB';
   const addressLabel = input.addressLabel?.trim() ? input.addressLabel.trim().slice(0, 160) : null;
 
-  db.prepare(
+  await db.execute(
     `INSERT INTO incidents (
        id, municipality_id, user_id, tracking_code, title, description, photo_url,
        lat, lng, address_label, category, urgency, department, status,
        ai_reasoning, ai_provider_used, channel, upvotes, internal_notes
-     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'PENDIENTE', ?, ?, ?, 1, '')`
-  ).run(
-    id,
-    municipality.id,
-    input.userId ?? null,
-    trackingCode,
-    classification.title,
-    description,
-    photoUrl,
-    input.lat,
-    input.lng,
-    addressLabel,
-    classification.category,
-    classification.urgency,
-    classification.department,
-    classification.aiReasoning,
-    classification.providerUsed,
-    channel
+     ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, 'PENDIENTE', $14, $15, $16, 1, '')`,
+    [
+      id,
+      municipality.id,
+      input.userId ?? null,
+      trackingCode,
+      classification.title,
+      description,
+      photoUrl,
+      input.lat,
+      input.lng,
+      addressLabel,
+      classification.category,
+      classification.urgency,
+      classification.department,
+      classification.aiReasoning,
+      classification.providerUsed,
+      channel,
+    ]
   );
 
   return {

@@ -36,7 +36,7 @@ export async function GET(request: NextRequest) {
     }
 
     const db = await getDb();
-    const municipality = resolveMunicipality(db, municipalityParam);
+    const municipality = await resolveMunicipality(db, municipalityParam);
 
     if (!municipality) {
       return NextResponse.json(
@@ -45,16 +45,15 @@ export async function GET(request: NextRequest) {
       );
     }
 
-    const incident = db
-      .prepare(
-        `SELECT id, municipality_id, tracking_code, title, description, address_label,
-                category, urgency, department, status, upvotes, internal_notes,
-                resolved_photo_url, created_at, updated_at
-         FROM incidents
-         WHERE UPPER(tracking_code) = ? AND municipality_id = ?
-         LIMIT 1`
-      )
-      .get(code, municipality.id) as IncidentTrackRow | undefined;
+    const incident = await db.queryOne<IncidentTrackRow>(
+      `SELECT id, municipality_id, tracking_code, title, description, address_label,
+              category, urgency, department, status, upvotes, internal_notes,
+              resolved_photo_url, created_at, updated_at
+       FROM incidents
+       WHERE UPPER(tracking_code) = $1 AND municipality_id = $2
+       LIMIT 1`,
+      [code, municipality.id]
+    );
 
     if (!incident) {
       return NextResponse.json(

@@ -1,194 +1,222 @@
+import dns from 'dns';
 import fs from 'fs';
 import path from 'path';
-import initSqlJs, { type Database as SqlJsDatabase, type SqlValue } from 'sql.js';
+import { Pool, type PoolClient, type QueryResultRow } from 'pg';
 import { seedDatabase } from './seed';
 
-const DATA_DIR = path.resolve(process.cwd(), 'data');
-const DB_PATH = path.join(DATA_DIR, 'almeriacerca.db');
-
-export interface PreparedStatement {
-  all: (...params: unknown[]) => unknown[];
-  get: (...params: unknown[]) => unknown;
-  run: (...params: unknown[]) => { changes: number };
-}
-
 export interface DbClient {
-  prepare: (sql: string) => PreparedStatement;
-  exec: (sql: string) => void;
-  transaction: <T extends (...args: never[]) => unknown>(fn: T) => T;
-  saveToDisk: () => void;
+  query: <T extends QueryResultRow = Record<string, unknown>>(
+    sql: string,
+    params?: unknown[]
+  ) => Promise<T[]>;
+  queryOne: <T extends QueryResultRow = Record<string, unknown>>(
+    sql: string,
+    params?: unknown[]
+  ) => Promise<T | undefined>;
+  execute: (sql: string, params?: unknown[]) => Promise<{ changes: number }>;
+  withTransaction: <T>(fn: (tx: DbClient) => Promise<T>) => Promise<T>;
 }
 
 declare global {
   // eslint-disable-next-line no-var
-  var __almeriacercaDb: DbClient | undefined;
+  var __almeriacercaPgPool: Pool | undefined;
   // eslint-disable-next-line no-var
-  var __almeriacercaDbPromise: Promise<DbClient> | undefined;
+  var __almeriacercaPgClient: DbClient | undefined;
+  // eslint-disable-next-line no-var
+  var __almeriacercaPgPromise: Promise<DbClient> | undefined;
 }
 
-function toSqlValue(val: unknown): SqlValue {
-  if (val === undefined || val === null) return null;
-  if (typeof val === 'boolean') return val ? 1 : 0;
-  if (typeof val === 'number' || typeof val === 'string' || val instanceof Uint8Array) {
+function readDatabaseUrlFromEnvFile(): string | undefined {
+  const envFiles = ['.env.local', '.env'];
+  for (const filename of envFiles) {
+    const filePath = path.resolve(process.cwd(), filename);
+    if (!fs.existsSync(filePath)) continue;
+    const content = fs.readFileSync(filePath, 'utf-8');
+    for (const rawLine of content.split(/\r?\n/)) {
+      const line = rawLine.trim();
+      if (!line || line.startsWith('#')) continue;
+      const match = line.match(/^DATABASE_URL\s*=\s*(.+)$/);
+      if (!match) continue;
+      let value = match[1].trim();
+      if (
+        (value.startsWith('"') && value.endsWith('"')) ||
+        (value.startsWith("'") && value.endsWith("'"))
+      ) {
+        value = value.slice(1, -1);
+      }
+      if (value) return value;
+    }
+  }
+  return undefined;
+}
+
+function toPgParams(sql: string): string {
+  let out = '';
+  let index = 1;
+  let inSingleQuote = false;
+  let inDoubleQuote = false;
+
+  for (let i = 0; i < sql.length; i++) {
+    const ch = sql[i];
+    if (ch === "'" && !inDoubleQuote) {
+      if (inSingleQuote && sql[i + 1] === "'") {
+        out += "''";
+        i++;
+        continue;
+      }
+      inSingleQuote = !inSingleQuote;
+      out += ch;
+      continue;
+    }
+    if (ch === '"' && !inSingleQuote) {
+      inDoubleQuote = !inDoubleQuote;
+      out += ch;
+      continue;
+    }
+    if (ch === '?' && !inSingleQuote && !inDoubleQuote) {
+      out += `$${index++}`;
+      continue;
+    }
+    out += ch;
+  }
+
+  return out;
+}
+
+function normalizeParams(params?: unknown[]): unknown[] {
+  if (!params || params.length === 0) return [];
+  return params.map((val) => {
+    if (val === undefined) return null;
+    if (typeof val === 'boolean') return val ? 1 : 0;
     return val;
-  }
-  return String(val);
+  });
 }
 
-function normalizeBindArgs(params: unknown[]): SqlValue[] | Record<string, SqlValue> | undefined {
-  if (params.length === 0) return undefined;
-  if (params.length === 1) {
-    const single = params[0];
-    if (Array.isArray(single)) {
-      return single.map(toSqlValue);
+async function resolveConnectionConfig(rawUrl: string): Promise<{
+  connectionString: string;
+  ssl: { rejectUnauthorized: boolean } | undefined;
+}> {
+  const parsed = new URL(rawUrl);
+  const supabaseDirect = parsed.hostname.match(/^db\.([a-z0-9]+)\.supabase\.co$/i);
+  const needsSsl =
+    parsed.hostname.includes('supabase.') ||
+    parsed.searchParams.get('sslmode') === 'require';
+
+  if (supabaseDirect) {
+    let hasIpv4 = false;
+    try {
+      await dns.promises.lookup(parsed.hostname, { family: 4 });
+      hasIpv4 = true;
+    } catch {
+      hasIpv4 = false;
     }
-    if (single !== null && typeof single === 'object' && !(single instanceof Uint8Array)) {
-      const mapped: Record<string, SqlValue> = {};
-      for (const [k, v] of Object.entries(single as Record<string, unknown>)) {
-        mapped[k] = toSqlValue(v);
+
+    if (!hasIpv4) {
+      const projectRef = supabaseDirect[1];
+      const poolerHost =
+        process.env.SUPABASE_POOLER_HOST || 'aws-0-eu-central-1.pooler.supabase.com';
+      const pooled = new URL(rawUrl);
+      pooled.hostname = poolerHost;
+      pooled.port = parsed.port || '5432';
+      if (!pooled.username.includes('.')) {
+        pooled.username = `${pooled.username}.${projectRef}`;
       }
-      return mapped;
-    }
-  }
-  return params.map(toSqlValue);
-}
-
-function createDbClient(rawDb: SqlJsDatabase): DbClient {
-  let inTransaction = false;
-
-  const saveToDisk = () => {
-    if (!fs.existsSync(DATA_DIR)) {
-      fs.mkdirSync(DATA_DIR, { recursive: true });
-    }
-    const exported = rawDb.export();
-    fs.writeFileSync(DB_PATH, Buffer.from(exported));
-  };
-
-  const client: DbClient = {
-    prepare(sql: string): PreparedStatement {
       return {
-        all(...params: unknown[]) {
-          const stmt = rawDb.prepare(sql);
-          try {
-            const bound = normalizeBindArgs(params);
-            if (bound !== undefined) {
-              stmt.bind(bound);
-            }
-            const rows: unknown[] = [];
-            while (stmt.step()) {
-              rows.push(stmt.getAsObject());
-            }
-            return rows;
-          } finally {
-            stmt.free();
-          }
-        },
-        get(...params: unknown[]) {
-          const stmt = rawDb.prepare(sql);
-          try {
-            const bound = normalizeBindArgs(params);
-            if (bound !== undefined) {
-              stmt.bind(bound);
-            }
-            return stmt.step() ? stmt.getAsObject() : undefined;
-          } finally {
-            stmt.free();
-          }
-        },
-        run(...params: unknown[]) {
-          const stmt = rawDb.prepare(sql);
-          try {
-            const bound = normalizeBindArgs(params);
-            if (bound !== undefined) {
-              stmt.bind(bound);
-            }
-            stmt.step();
-            const changes = rawDb.getRowsModified();
-            if (!inTransaction) {
-              saveToDisk();
-            }
-            return { changes };
-          } finally {
-            stmt.free();
-          }
-        },
+        connectionString: pooled.toString(),
+        ssl: { rejectUnauthorized: false },
       };
-    },
+    }
+  }
 
-    exec(sql: string) {
-      rawDb.exec(sql);
-      if (!inTransaction) {
-        saveToDisk();
-      }
-    },
-
-    transaction<T extends (...args: never[]) => unknown>(fn: T): T {
-      return ((...args: Parameters<T>) => {
-        const nested = inTransaction;
-        if (!nested) {
-          inTransaction = true;
-          rawDb.exec('BEGIN TRANSACTION');
-        }
-        try {
-          const result = fn(...args);
-          if (!nested) {
-            rawDb.exec('COMMIT');
-            inTransaction = false;
-            saveToDisk();
-          }
-          return result;
-        } catch (err) {
-          if (!nested) {
-            try {
-              rawDb.exec('ROLLBACK');
-            } catch {
-              // Ignore rollback failure
-            }
-            inTransaction = false;
-          }
-          throw err;
-        }
-      }) as T;
-    },
-
-    saveToDisk,
+  return {
+    connectionString: rawUrl,
+    ssl: needsSsl ? { rejectUnauthorized: false } : undefined,
   };
-
-  return client;
 }
 
-function initSchema(db: DbClient): void {
-  db.exec(`
-    PRAGMA foreign_keys = ON;
+function wrapRunner(
+  runner: Pick<Pool | PoolClient, 'query'>,
+  pool: Pool
+): DbClient {
+  return {
+    async query<T extends QueryResultRow = Record<string, unknown>>(
+      sql: string,
+      params?: unknown[]
+    ): Promise<T[]> {
+      const res = await runner.query<T>(toPgParams(sql), normalizeParams(params));
+      return res.rows;
+    },
 
+    async queryOne<T extends QueryResultRow = Record<string, unknown>>(
+      sql: string,
+      params?: unknown[]
+    ): Promise<T | undefined> {
+      const res = await runner.query<T>(toPgParams(sql), normalizeParams(params));
+      return res.rows[0];
+    },
+
+    async execute(sql: string, params?: unknown[]): Promise<{ changes: number }> {
+      const res = await runner.query(toPgParams(sql), normalizeParams(params));
+      return { changes: res.rowCount ?? 0 };
+    },
+
+    async withTransaction<T>(fn: (tx: DbClient) => Promise<T>): Promise<T> {
+      const client = await pool.connect();
+      try {
+        await client.query('BEGIN');
+        const txClient = wrapRunner(client, pool);
+        const result = await fn(txClient);
+        await client.query('COMMIT');
+        return result;
+      } catch (err) {
+        try {
+          await client.query('ROLLBACK');
+        } catch {
+          // Ignore rollback failure
+        }
+        throw err;
+      } finally {
+        client.release();
+      }
+    },
+  };
+}
+
+async function initSchema(db: DbClient): Promise<void> {
+  await db.execute(`CREATE EXTENSION IF NOT EXISTS vector;`);
+
+  await db.execute(`
     CREATE TABLE IF NOT EXISTS municipalities (
       id TEXT PRIMARY KEY,
       slug TEXT NOT NULL UNIQUE,
       name TEXT NOT NULL,
       province TEXT NOT NULL,
-      center_lat REAL NOT NULL,
-      center_lng REAL NOT NULL,
+      center_lat DOUBLE PRECISION NOT NULL,
+      center_lng DOUBLE PRECISION NOT NULL,
       streets_json TEXT NOT NULL,
       whatsapp_phone_id TEXT,
-      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+      created_at TEXT NOT NULL DEFAULT (to_char(NOW() AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"'))
     );
+  `);
 
+  await db.execute(`
     CREATE TABLE IF NOT EXISTS users (
       id TEXT PRIMARY KEY,
-      municipality_id TEXT NOT NULL,
+      municipality_id TEXT NOT NULL REFERENCES municipalities(id) ON DELETE CASCADE,
       email TEXT NOT NULL UNIQUE,
       password_hash TEXT NOT NULL,
       name TEXT NOT NULL,
       role TEXT NOT NULL CHECK (role IN ('CITIZEN', 'ADMIN', 'DEPARTMENT')),
       department_name TEXT,
       preferred_lang TEXT NOT NULL DEFAULT 'es',
-      created_at TEXT NOT NULL DEFAULT (datetime('now')),
-      FOREIGN KEY (municipality_id) REFERENCES municipalities(id) ON DELETE CASCADE
+      created_at TEXT NOT NULL DEFAULT (to_char(NOW() AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"'))
     );
+  `);
 
+  await db.execute(`
     CREATE TABLE IF NOT EXISTS citizen_profiles (
-      user_id TEXT PRIMARY KEY,
-      municipality_id TEXT NOT NULL,
+      user_id TEXT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+      municipality_id TEXT NOT NULL REFERENCES municipalities(id) ON DELETE CASCADE,
       street_name TEXT,
       neighborhood TEXT,
       household_size INTEGER NOT NULL DEFAULT 1,
@@ -200,22 +228,22 @@ function initSchema(db: DbClient): void {
       interests_json TEXT NOT NULL DEFAULT '[]',
       whatsapp_phone TEXT,
       notifications_opt_in INTEGER NOT NULL DEFAULT 1,
-      updated_at TEXT NOT NULL DEFAULT (datetime('now')),
-      FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
-      FOREIGN KEY (municipality_id) REFERENCES municipalities(id) ON DELETE CASCADE
+      updated_at TEXT NOT NULL DEFAULT (to_char(NOW() AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"'))
     );
+  `);
 
+  await db.execute(`
     CREATE TABLE IF NOT EXISTS incidents (
       id TEXT PRIMARY KEY,
-      municipality_id TEXT NOT NULL,
-      user_id TEXT,
+      municipality_id TEXT NOT NULL REFERENCES municipalities(id) ON DELETE CASCADE,
+      user_id TEXT REFERENCES users(id) ON DELETE SET NULL,
       tracking_code TEXT NOT NULL UNIQUE,
       title TEXT NOT NULL,
       description TEXT NOT NULL,
       photo_url TEXT,
       resolved_photo_url TEXT,
-      lat REAL NOT NULL,
-      lng REAL NOT NULL,
+      lat DOUBLE PRECISION NOT NULL,
+      lng DOUBLE PRECISION NOT NULL,
       address_label TEXT,
       category TEXT NOT NULL,
       urgency TEXT NOT NULL CHECK (urgency IN ('BAJA', 'MEDIA', 'ALTA', 'CRITICA')),
@@ -226,15 +254,15 @@ function initSchema(db: DbClient): void {
       channel TEXT NOT NULL DEFAULT 'WEB' CHECK (channel IN ('WEB', 'WHATSAPP')),
       upvotes INTEGER NOT NULL DEFAULT 1,
       internal_notes TEXT,
-      created_at TEXT NOT NULL DEFAULT (datetime('now')),
-      updated_at TEXT NOT NULL DEFAULT (datetime('now')),
-      FOREIGN KEY (municipality_id) REFERENCES municipalities(id) ON DELETE CASCADE,
-      FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE SET NULL
+      created_at TEXT NOT NULL DEFAULT (to_char(NOW() AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"')),
+      updated_at TEXT NOT NULL DEFAULT (to_char(NOW() AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"'))
     );
+  `);
 
+  await db.execute(`
     CREATE TABLE IF NOT EXISTS consultations (
       id TEXT PRIMARY KEY,
-      municipality_id TEXT NOT NULL,
+      municipality_id TEXT NOT NULL REFERENCES municipalities(id) ON DELETE CASCADE,
       question TEXT NOT NULL,
       answer TEXT NOT NULL,
       topic TEXT,
@@ -242,69 +270,77 @@ function initSchema(db: DbClient): void {
       channel TEXT NOT NULL DEFAULT 'WEB' CHECK (channel IN ('WEB', 'WHATSAPP')),
       tokens_saved INTEGER NOT NULL DEFAULT 0,
       provider_used TEXT NOT NULL,
-      created_at TEXT NOT NULL DEFAULT (datetime('now')),
-      FOREIGN KEY (municipality_id) REFERENCES municipalities(id) ON DELETE CASCADE
+      created_at TEXT NOT NULL DEFAULT (to_char(NOW() AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"'))
     );
+  `);
 
+  await db.execute(`
     CREATE TABLE IF NOT EXISTS rag_documents (
       id TEXT PRIMARY KEY,
-      municipality_id TEXT NOT NULL,
+      municipality_id TEXT NOT NULL REFERENCES municipalities(id) ON DELETE CASCADE,
       filename TEXT NOT NULL,
       doc_type TEXT NOT NULL,
       char_count INTEGER NOT NULL,
       chunk_count INTEGER NOT NULL,
       uploaded_by TEXT,
-      created_at TEXT NOT NULL DEFAULT (datetime('now')),
-      FOREIGN KEY (municipality_id) REFERENCES municipalities(id) ON DELETE CASCADE
+      created_at TEXT NOT NULL DEFAULT (to_char(NOW() AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"'))
     );
+  `);
 
+  await db.execute(`
     CREATE TABLE IF NOT EXISTS rag_chunks (
       chunk_id TEXT PRIMARY KEY,
-      document_id TEXT NOT NULL,
-      municipality_id TEXT NOT NULL,
+      document_id TEXT NOT NULL REFERENCES rag_documents(id) ON DELETE CASCADE,
+      municipality_id TEXT NOT NULL REFERENCES municipalities(id) ON DELETE CASCADE,
       filename TEXT NOT NULL,
       content TEXT NOT NULL,
-      FOREIGN KEY (document_id) REFERENCES rag_documents(id) ON DELETE CASCADE,
-      FOREIGN KEY (municipality_id) REFERENCES municipalities(id) ON DELETE CASCADE
+      embedding vector(768)
     );
+  `);
 
+  await db.execute(`
     CREATE TABLE IF NOT EXISTS rag_chunks_fts (
       chunk_id TEXT PRIMARY KEY,
-      document_id TEXT NOT NULL,
-      municipality_id TEXT NOT NULL,
+      document_id TEXT NOT NULL REFERENCES rag_documents(id) ON DELETE CASCADE,
+      municipality_id TEXT NOT NULL REFERENCES municipalities(id) ON DELETE CASCADE,
       filename TEXT NOT NULL,
-      content TEXT NOT NULL
+      content TEXT NOT NULL,
+      embedding vector(768)
     );
+  `);
 
+  await db.execute(`
     CREATE TABLE IF NOT EXISTS ai_provider_keys (
       id TEXT PRIMARY KEY,
-      municipality_id TEXT NOT NULL,
+      municipality_id TEXT NOT NULL REFERENCES municipalities(id) ON DELETE CASCADE,
       provider TEXT NOT NULL CHECK (provider IN ('GEMINI', 'GROQ', 'OPENAI', 'OPENROUTER', 'LOCAL')),
       api_key TEXT NOT NULL DEFAULT '',
       base_url TEXT NOT NULL DEFAULT '',
       enabled INTEGER NOT NULL DEFAULT 0,
-      updated_at TEXT NOT NULL DEFAULT (datetime('now')),
-      UNIQUE (municipality_id, provider),
-      FOREIGN KEY (municipality_id) REFERENCES municipalities(id) ON DELETE CASCADE
+      updated_at TEXT NOT NULL DEFAULT (to_char(NOW() AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"')),
+      UNIQUE (municipality_id, provider)
     );
+  `);
 
+  await db.execute(`
     CREATE TABLE IF NOT EXISTS ai_configs (
       id TEXT PRIMARY KEY,
-      municipality_id TEXT NOT NULL,
+      municipality_id TEXT NOT NULL REFERENCES municipalities(id) ON DELETE CASCADE,
       feature_key TEXT NOT NULL CHECK (feature_key IN ('CHAT', 'CLASSIFY', 'VISION')),
       primary_provider TEXT NOT NULL,
       primary_model TEXT NOT NULL,
       backups_json TEXT NOT NULL,
       max_tokens INTEGER NOT NULL DEFAULT 300,
-      temperature REAL NOT NULL DEFAULT 0.2,
-      updated_at TEXT NOT NULL DEFAULT (datetime('now')),
-      UNIQUE (municipality_id, feature_key),
-      FOREIGN KEY (municipality_id) REFERENCES municipalities(id) ON DELETE CASCADE
+      temperature DOUBLE PRECISION NOT NULL DEFAULT 0.2,
+      updated_at TEXT NOT NULL DEFAULT (to_char(NOW() AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"')),
+      UNIQUE (municipality_id, feature_key)
     );
+  `);
 
+  await db.execute(`
     CREATE TABLE IF NOT EXISTS municipal_aids (
       id TEXT PRIMARY KEY,
-      municipality_id TEXT NOT NULL,
+      municipality_id TEXT NOT NULL REFERENCES municipalities(id) ON DELETE CASCADE,
       title TEXT NOT NULL,
       description TEXT NOT NULL,
       discount_label TEXT NOT NULL,
@@ -312,89 +348,103 @@ function initSchema(db: DbClient): void {
       deadline TEXT,
       apply_url TEXT,
       active INTEGER NOT NULL DEFAULT 1,
-      created_at TEXT NOT NULL DEFAULT (datetime('now')),
-      FOREIGN KEY (municipality_id) REFERENCES municipalities(id) ON DELETE CASCADE
+      created_at TEXT NOT NULL DEFAULT (to_char(NOW() AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"'))
     );
+  `);
 
+  await db.execute(`
     CREATE TABLE IF NOT EXISTS street_alerts (
       id TEXT PRIMARY KEY,
-      municipality_id TEXT NOT NULL,
+      municipality_id TEXT NOT NULL REFERENCES municipalities(id) ON DELETE CASCADE,
       title TEXT NOT NULL,
       message TEXT NOT NULL,
       affected_streets_json TEXT NOT NULL,
       start_date TEXT NOT NULL,
       end_date TEXT NOT NULL,
       severity TEXT NOT NULL CHECK (severity IN ('INFO', 'WARNING', 'CRITICAL')),
-      created_at TEXT NOT NULL DEFAULT (datetime('now')),
-      FOREIGN KEY (municipality_id) REFERENCES municipalities(id) ON DELETE CASCADE
+      created_at TEXT NOT NULL DEFAULT (to_char(NOW() AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"'))
     );
+  `);
 
+  await db.execute(`
     CREATE TABLE IF NOT EXISTS user_notifications (
       id TEXT PRIMARY KEY,
-      user_id TEXT NOT NULL,
-      municipality_id TEXT NOT NULL,
+      user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      municipality_id TEXT NOT NULL REFERENCES municipalities(id) ON DELETE CASCADE,
       type TEXT NOT NULL CHECK (type IN ('STREET_ALERT', 'AID_MATCH', 'INCIDENT_UPDATE')),
       title TEXT NOT NULL,
       body TEXT NOT NULL,
       ref_id TEXT,
       is_read INTEGER NOT NULL DEFAULT 0,
-      created_at TEXT NOT NULL DEFAULT (datetime('now')),
-      FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
-      FOREIGN KEY (municipality_id) REFERENCES municipalities(id) ON DELETE CASCADE
+      created_at TEXT NOT NULL DEFAULT (to_char(NOW() AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"'))
     );
+  `);
 
+  await db.execute(`
     CREATE TABLE IF NOT EXISTS faq_cache (
       id TEXT PRIMARY KEY,
-      municipality_id TEXT NOT NULL,
+      municipality_id TEXT NOT NULL REFERENCES municipalities(id) ON DELETE CASCADE,
       normalized_question TEXT NOT NULL,
       lang TEXT NOT NULL,
       answer TEXT NOT NULL,
       hits INTEGER NOT NULL DEFAULT 1,
-      created_at TEXT NOT NULL DEFAULT (datetime('now')),
-      UNIQUE (municipality_id, normalized_question, lang),
-      FOREIGN KEY (municipality_id) REFERENCES municipalities(id) ON DELETE CASCADE
+      created_at TEXT NOT NULL DEFAULT (to_char(NOW() AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"')),
+      UNIQUE (municipality_id, normalized_question, lang)
     );
+  `);
 
-    CREATE INDEX IF NOT EXISTS idx_incidents_muni ON incidents(municipality_id);
-    CREATE INDEX IF NOT EXISTS idx_aids_muni ON municipal_aids(municipality_id);
-    CREATE INDEX IF NOT EXISTS idx_alerts_muni ON street_alerts(municipality_id);
-    CREATE INDEX IF NOT EXISTS idx_consultations_muni ON consultations(municipality_id);
-    CREATE INDEX IF NOT EXISTS idx_notifications_user ON user_notifications(user_id, municipality_id);
-    CREATE INDEX IF NOT EXISTS idx_rag_fts_muni ON rag_chunks_fts(municipality_id);
+  await db.execute(`CREATE INDEX IF NOT EXISTS idx_incidents_muni ON incidents(municipality_id);`);
+  await db.execute(`CREATE INDEX IF NOT EXISTS idx_aids_muni ON municipal_aids(municipality_id);`);
+  await db.execute(`CREATE INDEX IF NOT EXISTS idx_alerts_muni ON street_alerts(municipality_id);`);
+  await db.execute(`CREATE INDEX IF NOT EXISTS idx_consultations_muni ON consultations(municipality_id);`);
+  await db.execute(`CREATE INDEX IF NOT EXISTS idx_notifications_user ON user_notifications(user_id, municipality_id);`);
+  await db.execute(`CREATE INDEX IF NOT EXISTS idx_rag_chunks_muni ON rag_chunks(municipality_id);`);
+  await db.execute(`CREATE INDEX IF NOT EXISTS idx_rag_fts_muni ON rag_chunks_fts(municipality_id);`);
+  await db.execute(`
+    CREATE INDEX IF NOT EXISTS idx_rag_chunks_embedding_hnsw
+      ON rag_chunks USING hnsw (embedding vector_cosine_ops);
+  `);
+  await db.execute(`
+    CREATE INDEX IF NOT EXISTS idx_rag_fts_embedding_hnsw
+      ON rag_chunks_fts USING hnsw (embedding vector_cosine_ops);
   `);
 }
 
 export async function getDb(): Promise<DbClient> {
-  if (global.__almeriacercaDb) {
-    return global.__almeriacercaDb;
+  if (global.__almeriacercaPgClient) {
+    return global.__almeriacercaPgClient;
   }
 
-  if (!global.__almeriacercaDbPromise) {
-    global.__almeriacercaDbPromise = (async () => {
-      if (!fs.existsSync(DATA_DIR)) {
-        fs.mkdirSync(DATA_DIR, { recursive: true });
+  if (!global.__almeriacercaPgPromise) {
+    global.__almeriacercaPgPromise = (async () => {
+      const rawUrl = process.env.DATABASE_URL || readDatabaseUrlFromEnvFile();
+      if (!rawUrl) {
+        throw new Error('Falta la variable DATABASE_URL en .env.local o en el entorno.');
       }
 
-      const SQL = await initSqlJs({
-        useOldExtensionFunctions: false,
-        locateFile: (file: string) =>
-          path.join(process.cwd(), 'node_modules', 'sql.js', 'dist', file),
-      });
+      const { connectionString, ssl } = await resolveConnectionConfig(rawUrl);
+      const pool =
+        global.__almeriacercaPgPool ??
+        new Pool({
+          connectionString,
+          ssl,
+          max: 10,
+          idleTimeoutMillis: 30000,
+          connectionTimeoutMillis: 10000,
+        });
+      global.__almeriacercaPgPool = pool;
 
-      const fileExists = fs.existsSync(DB_PATH);
-      const rawDb = fileExists
-        ? new SQL.Database(fs.readFileSync(DB_PATH))
-        : new SQL.Database();
+      const client = wrapRunner(pool, pool);
+      await initSchema(client);
+      await seedDatabase(client);
 
-      const client = createDbClient(rawDb);
-      initSchema(client);
-      seedDatabase(client);
-      client.saveToDisk();
-
-      global.__almeriacercaDb = client;
+      global.__almeriacercaPgClient = client;
       return client;
-    })();
+    })().catch((err) => {
+      global.__almeriacercaPgPromise = undefined;
+      throw err;
+    });
   }
 
-  return global.__almeriacercaDbPromise;
+  return global.__almeriacercaPgPromise;
 }

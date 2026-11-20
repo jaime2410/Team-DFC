@@ -41,31 +41,28 @@ function mapRow(row: MunicipalityRow): MunicipalityRecord {
   };
 }
 
-export function resolveMunicipality(
+export async function resolveMunicipality(
   db: DbClient,
   municipalityIdOrSlug?: string | null
-): MunicipalityRecord | null {
+): Promise<MunicipalityRecord | null> {
   const trimmed = municipalityIdOrSlug?.trim();
   if (trimmed) {
-    const row = db
-      .prepare(
-        `SELECT id, slug, name, province, center_lat, center_lng, streets_json, whatsapp_phone_id
-         FROM municipalities
-         WHERE id = ? OR slug = ?
-         LIMIT 1`
-      )
-      .get(trimmed, trimmed) as MunicipalityRow | undefined;
+    const row = await db.queryOne<MunicipalityRow>(
+      `SELECT id, slug, name, province, center_lat, center_lng, streets_json, whatsapp_phone_id
+       FROM municipalities
+       WHERE id = $1 OR slug = $2
+       LIMIT 1`,
+      [trimmed, trimmed]
+    );
     return row ? mapRow(row) : null;
   }
 
-  const first = db
-    .prepare(
-      `SELECT id, slug, name, province, center_lat, center_lng, streets_json, whatsapp_phone_id
-       FROM municipalities
-       ORDER BY name ASC
-       LIMIT 1`
-    )
-    .get() as MunicipalityRow | undefined;
+  const first = await db.queryOne<MunicipalityRow>(
+    `SELECT id, slug, name, province, center_lat, center_lng, streets_json, whatsapp_phone_id
+     FROM municipalities
+     ORDER BY name ASC
+     LIMIT 1`
+  );
 
   return first ? mapRow(first) : null;
 }

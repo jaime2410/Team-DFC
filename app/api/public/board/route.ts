@@ -44,7 +44,7 @@ export async function GET(request: NextRequest) {
   try {
     const municipalityParam = request.nextUrl.searchParams.get('municipalityId');
     const db = await getDb();
-    const municipality = resolveMunicipality(db, municipalityParam);
+    const municipality = await resolveMunicipality(db, municipalityParam);
 
     if (!municipality) {
       return NextResponse.json(
@@ -53,14 +53,13 @@ export async function GET(request: NextRequest) {
       );
     }
 
-    const alertRows = db
-      .prepare(
-        `SELECT id, title, message, affected_streets_json, start_date, end_date, severity, created_at
-         FROM street_alerts
-         WHERE municipality_id = ?
-         ORDER BY created_at DESC`
-      )
-      .all(municipality.id) as StreetAlertRow[];
+    const alertRows = await db.query<StreetAlertRow>(
+      `SELECT id, title, message, affected_streets_json, start_date, end_date, severity, created_at
+       FROM street_alerts
+       WHERE municipality_id = $1
+       ORDER BY created_at DESC`,
+      [municipality.id]
+    );
 
     const streetAlerts = alertRows.map((row) => {
       let affectedStreets: string[] = [];
@@ -80,14 +79,13 @@ export async function GET(request: NextRequest) {
       };
     });
 
-    const aidRows = db
-      .prepare(
-        `SELECT id, title, description, discount_label, requirements_json, deadline, apply_url
-         FROM municipal_aids
-         WHERE municipality_id = ? AND active = 1
-         ORDER BY created_at DESC`
-      )
-      .all(municipality.id) as AidRow[];
+    const aidRows = await db.query<AidRow>(
+      `SELECT id, title, description, discount_label, requirements_json, deadline, apply_url
+       FROM municipal_aids
+       WHERE municipality_id = $1 AND active = 1
+       ORDER BY created_at DESC`,
+      [municipality.id]
+    );
 
     const municipalAids = aidRows.map((row) => {
       let requirements: Record<string, unknown> = {};
@@ -107,16 +105,15 @@ export async function GET(request: NextRequest) {
       };
     });
 
-    const resolvedRows = db
-      .prepare(
-        `SELECT id, tracking_code, title, description, address_label, category, department,
-                status, upvotes, internal_notes, resolved_photo_url, updated_at
-         FROM incidents
-         WHERE municipality_id = ? AND status = 'RESUELTA'
-         ORDER BY updated_at DESC
-         LIMIT 8`
-      )
-      .all(municipality.id) as ResolvedIncidentRow[];
+    const resolvedRows = await db.query<ResolvedIncidentRow>(
+      `SELECT id, tracking_code, title, description, address_label, category, department,
+              status, upvotes, internal_notes, resolved_photo_url, updated_at
+       FROM incidents
+       WHERE municipality_id = $1 AND status = 'RESUELTA'
+       ORDER BY updated_at DESC
+       LIMIT 8`,
+      [municipality.id]
+    );
 
     const resolvedIncidents = resolvedRows.map((row) => ({
       id: row.id,
@@ -132,15 +129,14 @@ export async function GET(request: NextRequest) {
       updatedAt: row.updated_at,
     }));
 
-    const sampleRows = db
-      .prepare(
-        `SELECT tracking_code
-         FROM incidents
-         WHERE municipality_id = ?
-         ORDER BY tracking_code ASC
-         LIMIT 3`
-      )
-      .all(municipality.id) as Array<{ tracking_code: string }>;
+    const sampleRows = await db.query<{ tracking_code: string }>(
+      `SELECT tracking_code
+       FROM incidents
+       WHERE municipality_id = $1
+       ORDER BY tracking_code ASC
+       LIMIT 3`,
+      [municipality.id]
+    );
 
     const mainSquare = municipality.streets[1] || municipality.streets[0] || 'Ayuntamiento';
 

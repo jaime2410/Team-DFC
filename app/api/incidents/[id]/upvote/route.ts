@@ -22,7 +22,7 @@ export async function POST(
 
     let municipalityId: string | null = null;
     if (municipalityParam) {
-      const municipality = resolveMunicipality(db, municipalityParam);
+      const municipality = await resolveMunicipality(db, municipalityParam);
       if (!municipality) {
         return NextResponse.json({ error: 'Municipio no encontrado.' }, { status: 404 });
       }
@@ -30,23 +30,26 @@ export async function POST(
     }
 
     const where = municipalityId
-      ? `(id = ? OR UPPER(tracking_code) = UPPER(?)) AND municipality_id = ?`
-      : `(id = ? OR UPPER(tracking_code) = UPPER(?))`;
+      ? `(id = $1 OR UPPER(tracking_code) = UPPER($2)) AND municipality_id = $3`
+      : `(id = $1 OR UPPER(tracking_code) = UPPER($2))`;
     const args = municipalityId ? [idOrCode, idOrCode, municipalityId] : [idOrCode, idOrCode];
 
-    const res = db
-      .prepare(
-        `UPDATE incidents SET upvotes = upvotes + 1, updated_at = datetime('now') WHERE ${where}`
-      )
-      .run(...args);
+    const res = await db.execute(
+      `UPDATE incidents
+       SET upvotes = upvotes + 1,
+           updated_at = to_char(NOW() AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"')
+       WHERE ${where}`,
+      args
+    );
 
     if (res.changes === 0) {
       return NextResponse.json({ error: 'Aviso no encontrado.' }, { status: 404 });
     }
 
-    const row = db
-      .prepare(`SELECT id, tracking_code, upvotes FROM incidents WHERE ${where}`)
-      .get(...args) as { id: string; tracking_code: string; upvotes: number } | undefined;
+    const row = await db.queryOne<{ id: string; tracking_code: string; upvotes: number }>(
+      `SELECT id, tracking_code, upvotes FROM incidents WHERE ${where}`,
+      args
+    );
 
     return NextResponse.json({
       ok: true,

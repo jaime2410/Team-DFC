@@ -372,32 +372,30 @@ async function synthesizeLocalChat({
 
 export async function runAITask(input: RunAITaskInput): Promise<RunAITaskResult> {
   const db = await getDb();
-  const municipality = resolveMunicipality(db, input.municipalityId);
+  const municipality = await resolveMunicipality(db, input.municipalityId);
   if (!municipality) {
     throw new Error('Municipio no encontrado para ejecutar tarea de IA.');
   }
 
-  const keyRows = db
-    .prepare(
-      `SELECT provider, api_key, base_url, enabled
-       FROM ai_provider_keys
-       WHERE municipality_id = ?`
-    )
-    .all(municipality.id) as ProviderKeyRow[];
+  const keyRows = await db.query<ProviderKeyRow>(
+    `SELECT provider, api_key, base_url, enabled
+     FROM ai_provider_keys
+     WHERE municipality_id = $1`,
+    [municipality.id]
+  );
 
   const keyMap = new Map<AIProvider, ProviderKeyRow>();
   for (const row of keyRows) {
     keyMap.set(row.provider, row);
   }
 
-  const configRow = db
-    .prepare(
-      `SELECT feature_key, primary_provider, primary_model, backups_json, max_tokens, temperature
-       FROM ai_configs
-       WHERE municipality_id = ? AND feature_key = ?
-       LIMIT 1`
-    )
-    .get(municipality.id, input.featureKey) as AiConfigRow | undefined;
+  const configRow = await db.queryOne<AiConfigRow>(
+    `SELECT feature_key, primary_provider, primary_model, backups_json, max_tokens, temperature
+     FROM ai_configs
+     WHERE municipality_id = $1 AND feature_key = $2
+     LIMIT 1`,
+    [municipality.id, input.featureKey]
+  );
 
   const maxTokens =
     configRow?.max_tokens ?? (input.featureKey === 'CHAT' ? 300 : 180);

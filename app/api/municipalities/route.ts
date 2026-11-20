@@ -17,13 +17,11 @@ interface MunicipalityRow {
 export async function GET() {
   try {
     const db = await getDb();
-    const rows = db
-      .prepare(
-        `SELECT id, slug, name, province, center_lat, center_lng, streets_json, whatsapp_phone_id
-         FROM municipalities
-         ORDER BY name ASC`
-      )
-      .all() as MunicipalityRow[];
+    const rows = await db.query<MunicipalityRow>(
+      `SELECT id, slug, name, province, center_lat, center_lng, streets_json, whatsapp_phone_id
+       FROM municipalities
+       ORDER BY name ASC`
+    );
 
     const municipalities = rows.map((row) => {
       let streets: string[] = [];

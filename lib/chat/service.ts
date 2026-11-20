@@ -62,7 +62,7 @@ function detectTopic(message: string): string {
   return 'General';
 }
 
-function recordConsultation(args: {
+async function recordConsultation(args: {
   municipalityId: string;
   question: string;
   answer: string;
@@ -71,12 +71,12 @@ function recordConsultation(args: {
   channel: ChatChannel;
   tokensSaved: boolean;
   providerUsed: string;
-}) {
-  return getDb().then((db) => {
-    db.prepare(
-      `INSERT INTO consultations (id, municipality_id, question, answer, topic, lang, channel, tokens_saved, provider_used)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
-    ).run(
+}): Promise<void> {
+  const db = await getDb();
+  await db.execute(
+    `INSERT INTO consultations (id, municipality_id, question, answer, topic, lang, channel, tokens_saved, provider_used)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
+    [
       `cons-${crypto.randomUUID()}`,
       args.municipalityId,
       args.question,
@@ -85,14 +85,14 @@ function recordConsultation(args: {
       args.lang,
       args.channel,
       args.tokensSaved ? 1 : 0,
-      args.providerUsed
-    );
-  });
+      args.providerUsed,
+    ]
+  );
 }
 
 export async function processChatMessage(input: ChatInput): Promise<ChatResult> {
   const db = await getDb();
-  const municipality = resolveMunicipality(db, input.municipalityId);
+  const municipality = await resolveMunicipality(db, input.municipalityId);
   if (!municipality) {
     throw new Error('Municipio no encontrado.');
   }

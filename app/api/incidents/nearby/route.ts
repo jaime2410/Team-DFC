@@ -29,18 +29,17 @@ export async function GET(request: NextRequest) {
     }
 
     const db = await getDb();
-    const municipality = resolveMunicipality(db, params.get('municipalityId'));
+    const municipality = await resolveMunicipality(db, params.get('municipalityId'));
     if (!municipality) {
       return NextResponse.json({ error: 'Municipio no encontrado.' }, { status: 404 });
     }
 
-    const rows = db
-      .prepare(
-        `SELECT id, tracking_code, title, category, status, upvotes, address_label, lat, lng
-         FROM incidents
-         WHERE municipality_id = ? AND status != 'RESUELTA'`
-      )
-      .all(municipality.id) as OpenIncidentRow[];
+    const rows = await db.query<OpenIncidentRow>(
+      `SELECT id, tracking_code, title, category, status, upvotes, address_label, lat, lng
+       FROM incidents
+       WHERE municipality_id = $1 AND status != 'RESUELTA'`,
+      [municipality.id]
+    );
 
     const incidents = rows
       .filter((row) => !category || row.category === category)

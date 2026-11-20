@@ -167,12 +167,13 @@ export async function POST(request: NextRequest) {
     const db = await getDb();
     let municipality: MunicipalityRecord | null = null;
     if (phoneNumberId) {
-      const row = db
-        .prepare(`SELECT id FROM municipalities WHERE whatsapp_phone_id = ? LIMIT 1`)
-        .get(phoneNumberId) as { id: string } | undefined;
-      if (row) municipality = resolveMunicipality(db, row.id);
+      const row = await db.queryOne<{ id: string }>(
+        `SELECT id FROM municipalities WHERE whatsapp_phone_id = $1 LIMIT 1`,
+        [phoneNumberId]
+      );
+      if (row) municipality = await resolveMunicipality(db, row.id);
     }
-    if (!municipality) municipality = resolveMunicipality(db, null);
+    if (!municipality) municipality = await resolveMunicipality(db, null);
     if (!municipality) {
       return NextResponse.json({ ok: false, error: 'Municipality not found' });
     }
