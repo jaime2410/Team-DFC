@@ -37,7 +37,9 @@ export async function GET(request: NextRequest) {
     const rows = await db.query<OpenIncidentRow>(
       `SELECT id, tracking_code, title, category, status, upvotes, address_label, lat, lng
        FROM incidents
-       WHERE municipality_id = $1 AND status != 'RESUELTA'`,
+       WHERE municipality_id = $1
+         AND status NOT IN ('RESUELTO', 'RESUELTA')
+         AND COALESCE(is_quarantined, 0) = 0`,
       [municipality.id]
     );
 

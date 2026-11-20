@@ -56,6 +56,9 @@ interface CreatedIncident {
   urgency: string;
   department: string;
   ai_reasoning: string;
+  image_description?: string | null;
+  photo_matches_text?: boolean;
+  emergency_112_alert?: boolean | string | null;
 }
 
 const SPEECH_LANGS: Record<string, string> = { es: 'es-ES', en: 'en-GB', fr: 'fr-FR', ar: 'ar-SA' };
@@ -70,6 +73,8 @@ const QUICK_CARDS = [
 
 function urgencyClass(urgency: string): string {
   switch (urgency) {
+    case 'EMERGENCIA_112':
+    case 'URGENTE':
     case 'CRITICA':
       return 'bg-terracota text-tarjeta';
     case 'ALTA':
@@ -495,6 +500,27 @@ function IncidentWizard() {
             <p className="text-tinta/80">{t('incident.codeHint')}</p>
           </div>
 
+          {(result.urgency === 'EMERGENCIA_112' || Boolean(result.emergency_112_alert)) && (
+            <div
+              role="alert"
+              className="rounded-3xl bg-terracota text-tarjeta p-6 font-heading font-bold text-lg shadow-md flex flex-col gap-1 a11y-card"
+            >
+              <span>⚠️ Peligro inmediato: llama al 112 ahora mismo</span>
+              <span className="text-sm font-normal text-tarjeta/90">
+                Tu aviso ha quedado asignado prioritariamente a Policía Local.
+              </span>
+            </div>
+          )}
+
+          {result.photo_matches_text === false && (
+            <div
+              role="status"
+              className="rounded-3xl bg-solAlmeria/25 border-2 border-solAlmeria p-5 text-sm font-semibold text-tinta a11y-card"
+            >
+              Nota de revisión visual: La fotografía adjunta no parece coincidir claramente con la descripción. Hemos registrado el aviso igualmente, pero un técnico podría solicitarte una foto adicional.
+            </div>
+          )}
+
           <div className="rounded-3xl bg-tarjeta border border-superficie p-6 sm:p-8 flex flex-col gap-4 a11y-card">
             <h2 className="font-heading font-bold text-xl text-tinta">{t('incident.summaryTitle')}</h2>
             <p className="text-lg font-semibold text-tinta">{result.title}</p>
@@ -507,7 +533,7 @@ function IncidentWizard() {
                 <dt className="text-xs font-semibold uppercase text-tinta/65">{t('incident.urgency')}</dt>
                 <dd className="mt-1">
                   <span className={`inline-block px-3 py-1 rounded-full text-sm font-bold ${urgencyClass(result.urgency)}`}>
-                    {t(`incident.urgencyLevels.${result.urgency}`)}
+                    {result.urgency}
                   </span>
                 </dd>
               </div>

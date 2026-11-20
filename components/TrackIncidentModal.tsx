@@ -3,16 +3,35 @@
 import React, { useEffect, useState } from 'react';
 import {
   CheckCircle2,
+  ClipboardCheck,
   Clock,
+  Eye,
   Loader2,
   MapPin,
+  RotateCcw,
   Search,
+  Star,
   Wrench,
   X,
 } from 'lucide-react';
 import { useTranslation } from '@/lib/i18n/I18nProvider';
 
-export type IncidentStatus = 'PENDIENTE' | 'EN_REVISION' | 'EN_CURSO' | 'RESUELTA';
+export type IncidentStatus =
+  | 'RECIBIDO'
+  | 'VISTO'
+  | 'ASIGNADO'
+  | 'EN_CURSO'
+  | 'RESUELTO'
+  | 'PENDIENTE'
+  | 'EN_REVISION'
+  | 'RESUELTA';
+
+export interface IncidentHistoryItem {
+  status: string;
+  timestamp: string;
+  actor: string;
+  note?: string;
+}
 
 export interface TrackedIncident {
   id: string;
@@ -26,6 +45,13 @@ export interface TrackedIncident {
   status: IncidentStatus;
   upvotes: number;
   internal_notes: string | null;
+  resolved_photo_url?: string | null;
+  citizen_rating?: number | null;
+  citizen_feedback?: string | null;
+  reopened_count?: number;
+  viewed_at?: string | null;
+  resolved_at?: string | null;
+  history?: IncidentHistoryItem[];
   created_at: string;
   updated_at: string;
 }
@@ -38,15 +64,38 @@ interface TrackIncidentModalProps {
   sampleCodes: string[];
 }
 
-const STATUS_ORDER: IncidentStatus[] = [
-  'PENDIENTE',
-  'EN_REVISION',
+const STATUS_ORDER = [
+  'RECIBIDO',
+  'VISTO',
+  'ASIGNADO',
   'EN_CURSO',
-  'RESUELTA',
-];
+  'RESUELTO',
+] as const;
+
+function normalizeStatus(status: IncidentStatus): (typeof STATUS_ORDER)[number] {
+  switch (status) {
+    case 'PENDIENTE':
+    case 'RECIBIDO':
+      return 'RECIBIDO';
+    case 'EN_REVISION':
+    case 'VISTO':
+      return 'VISTO';
+    case 'ASIGNADO':
+      return 'ASIGNADO';
+    case 'EN_CURSO':
+      return 'EN_CURSO';
+    case 'RESUELTA':
+    case 'RESUELTO':
+      return 'RESUELTO';
+    default:
+      return 'RECIBIDO';
+  }
+}
 
 function urgencyBadgeClass(urgency: string): string {
   switch (urgency) {
+    case 'EMERGENCIA_112':
+    case 'URGENTE':
     case 'CRITICA':
       return 'bg-terracota text-tarjeta';
     case 'ALTA':
@@ -70,6 +119,8 @@ export function TrackIncidentModal({
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [incident, setIncident] = useState<TrackedIncident | null>(null);
+  const [ratingBusy, setRatingBusy] = useState(false);
+  const [feedbackMsg, setFeedbackMsg] = useState<string | null>(null);
 
   useEffect(() => {
     if (!open) return;
@@ -84,6 +135,7 @@ export function TrackIncidentModal({
     setIncident(null);
     setError(null);
     setCode('');
+    setFeedbackMsg(null);
   }, [municipalitySlug]);
 
   if (!open) return null;
@@ -95,6 +147,7 @@ export function TrackIncidentModal({
     setLoading(true);
     setError(null);
     setIncident(null);
+    setFeedbackMsg(null);
 
     try {
       const params = new URLSearchParams({
@@ -122,18 +175,79 @@ export function TrackIncidentModal({
     }
   }
 
+  async function handleRate(stars: number) {
+    if (!incident || ratingBusy) return;
+    setRatingBusy(true);
+    try {
+      const res = await fetch(
+        `/api/incidents/${encodeURIComponent(incident.id)}/feedback`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            action: 'RATE',
+            rating: stars,
+            municipalityId: municipalitySlug,
+          }),
+        }
+      );
+      if (res.ok) {
+        setIncident({ ...incident, citizen_rating: stars });
+        setFeedbackMsg(`¡Gracias por valorar con ${stars}/5 estrellas!`);
+      }
+    } finally {
+      setRatingBusy(false);
+    }
+  }
+
+  async function handleReopen() {
+    if (!incident || ratingBusy) return;
+    setRatingBusy(true);
+    try {
+      const res = await fetch(
+        `/api/incidents/${encodeURIComponent(incident.id)}/feedback`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            action: 'REOPEN',
+            feedback: 'Sigue sin funcionar correctamente',
+            municipalityId: municipalitySlug,
+          }),
+        }
+      );
+      if (res.ok) {
+        setIncident({
+          ...incident,
+          status: 'EN_CURSO',
+          urgency: 'URGENTE',
+          reopened_count: (incident.reopened_count ?? 0) + 1,
+        });
+        setFeedbackMsg(
+          'Hemos reabierto el aviso con prioridad URGENTE para que el equipo vuelva a revisarlo.'
+        );
+      }
+    } finally {
+      setRatingBusy(false);
+    }
+  }
+
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     void lookupCode(code);
   }
 
-  const activeStepIndex = incident ? STATUS_ORDER.indexOf(incident.status) : -1;
+  const normalizedStatus = incident ? normalizeStatus(incident.status) : null;
+  const activeStepIndex = normalizedStatus
+    ? STATUS_ORDER.indexOf(normalizedStatus)
+    : -1;
 
   const timelineSteps = [
-    { key: 'PENDIENTE', label: t('home.trackModal.steps.received'), icon: Clock },
-    { key: 'EN_REVISION', label: t('home.trackModal.steps.review'), icon: Search },
+    { key: 'RECIBIDO', label: t('home.trackModal.steps.received'), icon: Clock },
+    { key: 'VISTO', label: 'Visto', icon: Eye },
+    { key: 'ASIGNADO', label: 'Asignado', icon: ClipboardCheck },
     { key: 'EN_CURSO', label: t('home.trackModal.steps.inProgress'), icon: Wrench },
-    { key: 'RESUELTA', label: t('home.trackModal.steps.resolved'), icon: CheckCircle2 },
+    { key: 'RESUELTO', label: t('home.trackModal.steps.resolved'), icon: CheckCircle2 },
   ];
 
   return (
@@ -156,7 +270,8 @@ export function TrackIncidentModal({
               {t('home.trackModal.title')}
             </h2>
             <p className="text-sm sm:text-base text-tinta/75 mt-1">
-              {t('home.trackModal.subtitle')} · <strong className="text-tinta">{municipalityName}</strong>
+              {t('home.trackModal.subtitle')} ·{' '}
+              <strong className="text-tinta">{municipalityName}</strong>
             </p>
           </div>
           <button
@@ -245,8 +360,17 @@ export function TrackIncidentModal({
               </p>
             </div>
 
-            {/* Línea temporal visual de 4 estados */}
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+            {incident.urgency === 'EMERGENCIA_112' && (
+              <div
+                role="alert"
+                className="rounded-2xl bg-terracota text-tarjeta p-4 font-heading font-bold text-sm sm:text-base shadow-sm"
+              >
+                ⚠️ Peligro inmediato: llama al 112 ahora mismo (Policía Local asignada)
+              </div>
+            )}
+
+            {/* Línea temporal visual de 5 estados */}
+            <div className="grid grid-cols-2 sm:grid-cols-5 gap-2.5">
               {timelineSteps.map((step, idx) => {
                 const Icon = step.icon;
                 const isDone = idx <= activeStepIndex;
@@ -254,7 +378,7 @@ export function TrackIncidentModal({
                 return (
                   <div
                     key={step.key}
-                    className={`rounded-2xl p-3 border flex flex-col items-center text-center gap-2 transition-colors ${
+                    className={`rounded-2xl p-3 border flex flex-col items-center text-center gap-1.5 transition-colors ${
                       isCurrent
                         ? 'bg-verdeCabo text-tarjeta border-verdeCabo shadow-sm'
                         : isDone
@@ -263,7 +387,7 @@ export function TrackIncidentModal({
                     }`}
                   >
                     <Icon className="w-5 h-5 shrink-0" aria-hidden="true" />
-                    <span className="text-xs sm:text-sm font-bold leading-tight">
+                    <span className="text-xs font-bold leading-tight">
                       {step.label}
                     </span>
                   </div>
@@ -290,7 +414,9 @@ export function TrackIncidentModal({
                 </dt>
                 <dd className="font-semibold text-tinta mt-0.5 flex items-center gap-1">
                   <MapPin className="w-3.5 h-3.5 text-terracota shrink-0" />
-                  <span className="truncate">{incident.address_label || municipalityName}</span>
+                  <span className="truncate">
+                    {incident.address_label || municipalityName}
+                  </span>
                 </dd>
               </div>
             </dl>
@@ -301,6 +427,91 @@ export function TrackIncidentModal({
                   {t('home.trackModal.note')}
                 </p>
                 <p className="text-sm text-tinta/85">{incident.internal_notes}</p>
+              </div>
+            )}
+
+            {incident.history && incident.history.length > 0 && (
+              <div className="rounded-2xl bg-tarjeta border border-superficie p-4 flex flex-col gap-2">
+                <p className="text-xs font-bold uppercase tracking-wide text-tinta/70">
+                  Historial de auditoría y cambios de estado
+                </p>
+                <ul className="flex flex-col gap-1.5 text-xs text-tinta/85">
+                  {incident.history.map((h, idx) => (
+                    <li
+                      key={`${h.status}-${idx}`}
+                      className="flex flex-wrap items-center justify-between gap-2 rounded-xl bg-arena px-3 py-2"
+                    >
+                      <span>
+                        <strong>{h.status}</strong> · {h.actor}
+                        {h.note ? ` — ${h.note}` : ''}
+                      </span>
+                      <span className="text-tinta/65 font-semibold">
+                        {new Date(h.timestamp).toLocaleString('es-ES', {
+                          dateStyle: 'short',
+                          timeStyle: 'short',
+                        })}
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+
+            {incident.resolved_photo_url && (
+              <div className="rounded-2xl bg-tarjeta border border-superficie p-4 flex flex-col gap-2">
+                <p className="text-xs font-bold uppercase tracking-wide text-verdeCabo">
+                  Foto de cierre adjuntada por el operario
+                </p>
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img
+                  src={incident.resolved_photo_url}
+                  alt="Foto de resolución"
+                  className="w-full max-h-56 object-cover rounded-xl"
+                />
+              </div>
+            )}
+
+            {normalizedStatus === 'RESUELTO' && (
+              <div className="rounded-2xl bg-tarjeta border border-superficie p-4 flex flex-col gap-3">
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <div>
+                    <p className="text-sm font-bold text-tinta">
+                      ¿Ha quedado bien resuelto?
+                    </p>
+                    <div className="flex items-center gap-1.5 mt-1.5">
+                      {[1, 2, 3, 4, 5].map((star) => (
+                        <button
+                          key={star}
+                          type="button"
+                          disabled={ratingBusy}
+                          onClick={() => void handleRate(star)}
+                          aria-label={`Valorar con ${star} estrellas`}
+                          className={`p-1.5 rounded-xl transition-colors ${
+                            (incident.citizen_rating ?? 0) >= star
+                              ? 'text-solAlmeria bg-solAlmeria/15'
+                              : 'text-tinta/40 hover:text-solAlmeria'
+                          }`}
+                        >
+                          <Star className="w-5 h-5 fill-current" />
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  <button
+                    type="button"
+                    disabled={ratingBusy}
+                    onClick={() => void handleReopen()}
+                    className="min-h-[44px] px-4 py-2 rounded-2xl bg-terracota text-tarjeta text-sm font-bold inline-flex items-center gap-2 hover:opacity-95 transition-opacity"
+                  >
+                    <RotateCcw className="w-4 h-4" aria-hidden="true" />
+                    <span>Sigue sin funcionar</span>
+                  </button>
+                </div>
+
+                {feedbackMsg && (
+                  <p className="text-xs font-semibold text-verdeCabo">{feedbackMsg}</p>
+                )}
               </div>
             )}
           </div>

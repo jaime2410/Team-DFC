@@ -1,6 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getDb } from '@/lib/db';
 import { resolveMunicipality } from '@/lib/db/municipalities';
+import {
+  normalizeIncidentStatus,
+  parseIncidentHistory,
+  type IncidentLifecycleStatus,
+} from '@/lib/incidents/service';
 
 export const dynamic = 'force-dynamic';
 
@@ -14,10 +19,16 @@ interface IncidentTrackRow {
   category: string;
   urgency: string;
   department: string;
-  status: 'PENDIENTE' | 'EN_REVISION' | 'EN_CURSO' | 'RESUELTA';
+  status: IncidentLifecycleStatus;
   upvotes: number;
   internal_notes: string | null;
   resolved_photo_url: string | null;
+  citizen_rating: number | null;
+  citizen_feedback: string | null;
+  reopened_count: number;
+  viewed_at: string | null;
+  resolved_at: string | null;
+  history_json: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -48,7 +59,9 @@ export async function GET(request: NextRequest) {
     const incident = await db.queryOne<IncidentTrackRow>(
       `SELECT id, municipality_id, tracking_code, title, description, address_label,
               category, urgency, department, status, upvotes, internal_notes,
-              resolved_photo_url, created_at, updated_at
+              resolved_photo_url, citizen_rating, citizen_feedback,
+              COALESCE(reopened_count, 0) AS reopened_count,
+              viewed_at, resolved_at, history_json, created_at, updated_at
        FROM incidents
        WHERE UPPER(tracking_code) = $1 AND municipality_id = $2
        LIMIT 1`,
@@ -68,7 +81,11 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({
       found: true,
       municipalityName: municipality.name,
-      incident,
+      incident: {
+        ...incident,
+        status: normalizeIncidentStatus(incident.status),
+        history: parseIncidentHistory(incident.history_json),
+      },
     });
   } catch (error) {
     console.error('Error tracking incident:', error);

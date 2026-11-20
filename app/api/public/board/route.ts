@@ -109,7 +109,9 @@ export async function GET(request: NextRequest) {
       `SELECT id, tracking_code, title, description, address_label, category, department,
               status, upvotes, internal_notes, resolved_photo_url, updated_at
        FROM incidents
-       WHERE municipality_id = $1 AND status = 'RESUELTA'
+       WHERE municipality_id = $1
+         AND status IN ('RESUELTO', 'RESUELTA')
+         AND COALESCE(is_quarantined, 0) = 0
        ORDER BY updated_at DESC
        LIMIT 8`,
       [municipality.id]

@@ -40,6 +40,8 @@ export interface RunAITaskResult {
   modelUsed: string;
   fallbackTriggered: boolean;
   attempts: ProviderAttempt[];
+  inputTokens: number;
+  outputTokens: number;
 }
 
 interface ProviderKeyRow {
@@ -152,12 +154,23 @@ async function callGemini({
     candidates?: Array<{
       content?: { parts?: Array<{ text?: string }> };
     }>;
+    usageMetadata?: {
+      promptTokenCount?: number;
+      candidatesTokenCount?: number;
+    };
   };
   const text = json.candidates?.[0]?.content?.parts?.[0]?.text?.trim();
   if (!text) {
     throw new Error('GEMINI returned empty response');
   }
-  return text;
+  const estIn = Math.ceil((systemPrompt.length + userPrompt.length) / 4);
+  const estOut = Math.ceil(text.length / 4);
+  return JSON.stringify({
+    __llm_wrapped: true,
+    text,
+    inputTokens: json.usageMetadata?.promptTokenCount ?? estIn,
+    outputTokens: json.usageMetadata?.candidatesTokenCount ?? estOut,
+  });
 }
 
 async function callOpenAICompatible({
@@ -233,12 +246,51 @@ async function callOpenAICompatible({
 
   const json = (await res.json()) as {
     choices?: Array<{ message?: { content?: string } }>;
+    usage?: {
+      prompt_tokens?: number;
+      completion_tokens?: number;
+    };
   };
   const text = json.choices?.[0]?.message?.content?.trim();
   if (!text) {
     throw new Error(`${provider} returned empty response`);
   }
-  return text;
+  const estIn = Math.ceil((systemPrompt.length + userPrompt.length) / 4);
+  const estOut = Math.ceil(text.length / 4);
+  return JSON.stringify({
+    __llm_wrapped: true,
+    text,
+    inputTokens: json.usage?.prompt_tokens ?? estIn,
+    outputTokens: json.usage?.completion_tokens ?? estOut,
+  });
+}
+
+function unwrapLlmResult(
+  raw: string,
+  promptLen: number
+): { text: string; inputTokens: number; outputTokens: number } {
+  try {
+    const parsed = JSON.parse(raw) as {
+      __llm_wrapped?: boolean;
+      text?: string;
+      inputTokens?: number;
+      outputTokens?: number;
+    };
+    if (parsed && parsed.__llm_wrapped && typeof parsed.text === 'string') {
+      return {
+        text: parsed.text,
+        inputTokens: Number(parsed.inputTokens ?? Math.ceil(promptLen / 4)),
+        outputTokens: Number(parsed.outputTokens ?? Math.ceil(parsed.text.length / 4)),
+      };
+    }
+  } catch {
+    // Not wrapped
+  }
+  return {
+    text: raw,
+    inputTokens: Math.ceil(promptLen / 4),
+    outputTokens: Math.ceil(raw.length / 4),
+  };
 }
 
 export function classifyLocally(userPrompt: string, hasImage: boolean): string {
@@ -247,10 +299,21 @@ export function classifyLocally(userPrompt: string, hasImage: boolean): string {
     .normalize('NFD')
     .replace(/[\u0300-\u036f]/g, '');
 
+  const immediateDanger =
+    /(112|incendio|fuego|humo|derrumbe|cable|electro|explosi|herido|inundacion|accidente grave)/.test(
+      norm
+    );
+
   let category = 'Otros';
   let department = 'Atención Ciudadana';
 
-  if (/(farola|luz|alumbrado|oscuro|lampara|bombilla|cable|poste)/.test(norm)) {
+  if (/(polideportivo|piscina|pista|deport|gimnasio|campo de futbol|pabellon)/.test(norm)) {
+    category = 'Otros';
+    department = 'Deportes';
+  } else if (/(feria|fiesta|verbena|procesion|escenario|cabalgata|evento|concierto)/.test(norm)) {
+    category = 'Otros';
+    department = 'Fiestas';
+  } else if (/(farola|luz|alumbrado|oscuro|lampara|bombilla|cable|poste)/.test(norm)) {
     category = 'Alumbrado';
     department = 'Electricidad';
   } else if (/(agua|fuga|tuberia|alcantarilla|fuente|riego|inundacion|charco)/.test(norm)) {
@@ -267,9 +330,12 @@ export function classifyLocally(userPrompt: string, hasImage: boolean): string {
     department = 'Medio Ambiente';
   }
 
-  let urgency: 'BAJA' | 'MEDIA' | 'ALTA' | 'CRITICA' = 'MEDIA';
-  if (/(peligro|critica|urgente|cable caido|electro|inundacion|socavon|accidente|incendio|fuego|hospital|derrumbe)/.test(norm)) {
-    urgency = 'CRITICA';
+  let urgency: 'BAJA' | 'MEDIA' | 'ALTA' | 'URGENTE' | 'EMERGENCIA_112' = 'MEDIA';
+  if (immediateDanger) {
+    urgency = 'EMERGENCIA_112';
+    department = 'Policía Local';
+  } else if (/(peligro|critica|urgente|socavon|accidente|hospital)/.test(norm)) {
+    urgency = 'URGENTE';
   } else if (/(fuga|sin luz|apagada|roto|rota|desbordado|bloquea|caido|caida|varias)/.test(norm)) {
     urgency = 'ALTA';
   } else if (/(sugerencia|horario|pintura|leve|pequeno|consulta|solicitud)/.test(norm)) {
@@ -278,6 +344,8 @@ export function classifyLocally(userPrompt: string, hasImage: boolean): string {
 
   const snippet = userPrompt.trim().replace(/\s+/g, ' ').slice(0, 62);
   const title = snippet.length > 0 ? snippet : `Incidencia de ${category}`;
+  const photoMatchesText = !/(no coincide|foto distinta|imagen equivocada|otra cosa)/.test(norm);
+  const detectedRisk = immediateDanger || urgency === 'URGENTE';
 
   return JSON.stringify({
     title,
@@ -285,8 +353,13 @@ export function classifyLocally(userPrompt: string, hasImage: boolean): string {
     urgency,
     department,
     aiReasoning: hasImage
-      ? `Clasificación local con imagen adjunta en ${category} (${urgency}) para ${department}.`
+      ? `Clasificación local con análisis de imagen en ${category} (${urgency}) para ${department}.`
       : `Clasificación determinista local en ${category} (${urgency}) asignada a ${department}.`,
+    imageDescription: hasImage
+      ? `Imagen ciudadana asociada a ${category.toLowerCase()} (${title}).`
+      : null,
+    photoMatchesText,
+    detectedRisk,
   });
 }
 
@@ -459,6 +532,8 @@ export async function runAITask(input: RunAITaskInput): Promise<RunAITaskResult>
         modelUsed: candidate.model || 'deterministic-v1',
         fallbackTriggered: i > 0,
         attempts,
+        inputTokens: 0,
+        outputTokens: 0,
       };
     }
 
@@ -474,7 +549,7 @@ export async function runAITask(input: RunAITaskInput): Promise<RunAITaskResult>
     }
 
     try {
-      const text =
+      const rawReply =
         candidate.provider === 'GEMINI'
           ? await callGemini({
               apiKey: providerCreds.api_key.trim(),
@@ -500,6 +575,11 @@ export async function runAITask(input: RunAITaskInput): Promise<RunAITaskResult>
               temperature,
             });
 
+      const unwrapped = unwrapLlmResult(
+        rawReply,
+        input.systemPrompt.length + input.userPrompt.length
+      );
+
       attempts.push({
         provider: candidate.provider,
         model: candidate.model,
@@ -507,11 +587,13 @@ export async function runAITask(input: RunAITaskInput): Promise<RunAITaskResult>
       });
 
       return {
-        text,
+        text: unwrapped.text,
         providerUsed: candidate.provider,
         modelUsed: candidate.model,
         fallbackTriggered: i > 0,
         attempts,
+        inputTokens: unwrapped.inputTokens,
+        outputTokens: unwrapped.outputTokens,
       };
     } catch (err) {
       attempts.push({
@@ -541,6 +623,8 @@ export async function runAITask(input: RunAITaskInput): Promise<RunAITaskResult>
     modelUsed: 'deterministic-v1',
     fallbackTriggered: true,
     attempts,
+    inputTokens: 0,
+    outputTokens: 0,
   };
 }
 

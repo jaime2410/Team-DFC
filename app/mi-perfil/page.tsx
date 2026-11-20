@@ -22,6 +22,7 @@ import {
   Save,
   ShieldCheck,
   Sparkles,
+  Trash2,
   Users,
 } from 'lucide-react';
 import { useTranslation } from '@/lib/i18n/I18nProvider';
@@ -68,6 +69,14 @@ interface UserIncidentItem {
   department: string;
   status: string;
   internal_notes: string | null;
+  viewed_at?: string | null;
+  resolved_at?: string | null;
+  history?: Array<{
+    status: string;
+    timestamp: string;
+    actor: string;
+    note?: string;
+  }>;
 }
 
 interface ProfileApiPayload {
@@ -113,6 +122,9 @@ export default function MiPerfilPage() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [saveSuccess, setSaveSuccess] = useState(false);
+  const [confirmDeleteRgpd, setConfirmDeleteRgpd] = useState(false);
+  const [deletingRgpd, setDeletingRgpd] = useState(false);
+  const [deletedBanner, setDeletedBanner] = useState<string | null>(null);
   const [data, setData] = useState<ProfileApiPayload | null>(null);
 
   // Estado editable de la encuesta de hogar
@@ -247,6 +259,23 @@ export default function MiPerfilPage() {
     }
   }
 
+  async function handleDeleteMyDataRgpd() {
+    setDeletingRgpd(true);
+    try {
+      const res = await fetch('/api/profile', { method: 'DELETE' });
+      const json = (await res.json()) as { message?: string };
+      window.dispatchEvent(new Event('almeriacerca-auth-changed'));
+      setConfirmDeleteRgpd(false);
+      setDeletedBanner(
+        json.message ||
+          'Tus datos personales, perfil de hogar y notificaciones han sido eliminados conforme al RGPD.'
+      );
+      setData({ authenticated: false });
+    } finally {
+      setDeletingRgpd(false);
+    }
+  }
+
   if (loading) {
     return (
       <div className="flex flex-col gap-6 max-w-5xl mx-auto">
@@ -259,6 +288,15 @@ export default function MiPerfilPage() {
   if (!data?.authenticated || !data.user) {
     return (
       <div className="max-w-2xl mx-auto flex flex-col gap-8">
+        {deletedBanner && (
+          <div
+            role="status"
+            className="rounded-3xl bg-verdeCabo text-tarjeta p-5 font-semibold flex items-center gap-3 shadow-sm a11y-card"
+          >
+            <CheckCircle2 className="w-6 h-6 shrink-0" aria-hidden="true" />
+            <span>{deletedBanner}</span>
+          </div>
+        )}
         <section className="rounded-3xl bg-buganvilla text-tarjeta p-7 sm:p-10 shadow-sm flex flex-col gap-5 a11y-card">
           <span className="w-14 h-14 rounded-2xl bg-tarjeta/20 flex items-center justify-center">
             <BellRing className="w-8 h-8" aria-hidden="true" />
@@ -463,6 +501,29 @@ export default function MiPerfilPage() {
                     {inc.internal_notes}
                   </p>
                 )}
+                {inc.history && inc.history.length > 0 && (
+                  <div className="mt-2 pt-2 border-t border-superficie flex flex-col gap-1">
+                    <p className="text-[11px] font-bold uppercase text-tinta/60">
+                      Historial de estados
+                    </p>
+                    {inc.history.map((h, hIdx) => (
+                      <div
+                        key={`${h.status}-${hIdx}`}
+                        className="flex items-center justify-between text-xs text-tinta/80"
+                      >
+                        <span>
+                          <strong>{h.status}</strong> · {h.actor}
+                        </span>
+                        <span className="text-tinta/60">
+                          {new Date(h.timestamp).toLocaleString('es-ES', {
+                            dateStyle: 'short',
+                            timeStyle: 'short',
+                          })}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                )}
               </div>
             ))}
           </div>
@@ -480,7 +541,7 @@ export default function MiPerfilPage() {
             <span>{t('profile.section2Title')}</span>
           </h2>
           <p className="text-sm sm:text-base text-tinta/75 mt-1">
-            {t('profile.section2Subtitle')}
+            Información orientativa: estas convocatorias municipales <strong>podrían encajar contigo</strong> según tu encuesta de hogar (sujetas a verificación en el Ayuntamiento).
           </p>
         </div>
 
@@ -793,6 +854,59 @@ export default function MiPerfilPage() {
             </button>
           </div>
         </form>
+      </section>
+
+      {/* SECCIÓN 4 — Privacidad y Derecho al Olvido (RGPD) */}
+      <section
+        aria-labelledby="section-rgpd-title"
+        className="rounded-3xl bg-tarjeta border border-superficie p-6 sm:p-8 shadow-sm flex flex-col sm:flex-row sm:items-center justify-between gap-6 a11y-card"
+      >
+        <div className="max-w-2xl">
+          <h2
+            id="section-rgpd-title"
+            className="font-heading font-bold text-xl text-tinta flex items-center gap-2"
+          >
+            <Trash2 className="w-5 h-5 text-terracota" aria-hidden="true" />
+            <span>Privacidad y Derecho al Olvido (RGPD)</span>
+          </h2>
+          <p className="text-sm text-tinta/75 mt-1">
+            Puedes eliminar tus datos personales, perfil de hogar y alertas en cualquier momento con un solo clic (o escribiendo &ldquo;borrar mis datos&rdquo; en el asistente).
+          </p>
+        </div>
+
+        <div className="flex flex-wrap items-center gap-3 shrink-0">
+          {!confirmDeleteRgpd ? (
+            <button
+              type="button"
+              onClick={() => setConfirmDeleteRgpd(true)}
+              className="min-h-[48px] px-6 rounded-2xl bg-terracota/15 text-terracota hover:bg-terracota hover:text-tarjeta font-bold text-sm inline-flex items-center gap-2 transition-colors"
+            >
+              <Trash2 className="w-4 h-4" aria-hidden="true" />
+              <span>Borrar mis datos</span>
+            </button>
+          ) : (
+            <>
+              <button
+                type="button"
+                disabled={deletingRgpd}
+                onClick={() => void handleDeleteMyDataRgpd()}
+                className="min-h-[48px] px-6 rounded-2xl bg-terracota text-tarjeta font-bold text-sm inline-flex items-center gap-2"
+              >
+                <Trash2 className="w-4 h-4" aria-hidden="true" />
+                <span>
+                  {deletingRgpd ? 'Eliminando...' : 'Confirmar borrado definitivo'}
+                </span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setConfirmDeleteRgpd(false)}
+                className="min-h-[48px] px-4 rounded-2xl bg-superficie text-tinta font-semibold text-sm"
+              >
+                Cancelar
+              </button>
+            </>
+          )}
+        </div>
       </section>
     </div>
   );

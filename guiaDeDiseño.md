@@ -284,9 +284,9 @@ Implementado en `lib/db/index.ts` sobre Supabase PostgreSQL (`CREATE EXTENSION I
 - [x] Acceso básico completo sin iniciar sesión (Asistente, Incidencias, Seguimiento, Tablón).
 - [x] Login ciudadano + Encuesta de hogar + Alertas automáticas por calle + Recomendador de ayudas/descuentos (`0 tokens`).
 - [x] Login administrador aislado por municipio (multi-tenant).
-- [ ] Ciclo de 5 estados en incidencias (`RECIBIDO`, `VISTO`, `ASIGNADO`, `EN_CURSO`, `RESUELTO`), foto de cierre del operario, valoración ciudadana, botón *"Sigue sin funcionar"* (reapertura) y agrupación de duplicados (`< 150m`) con escalado automático de prioridad (`BAJA` a `EMERGENCIA_112`) y notificación a todos los reportantes.
-- [ ] Bandeja de Cuarentena / Spam en `/admin` con motivo registrado y recuperación de avisos legítimos.
-- [ ] Base de Conocimiento en `/admin` con subida `.pdf`/`.txt`/`.md` o texto/URL oficial, estado de vigencia (`VIGENTE` / `DEROGADA`), contador de usos en respuestas y botón de derogar en 1 clic.
-- [ ] Sección de "FAQ Sugeridas" en `/admin` aprobables en 1 clic para responder en `0 tokens`.
-- [ ] Botón *"Hablar con una persona"* en `/asistente` cuando el RAG no tenga respaldo y botón/comando *"Borrar mis datos"* en `/mi-perfil`.
-- [ ] `README.md` completo, configuración Capacitor y despliegue en Vercel conectado a GitHub.
+- [x] Ciclo de 5 estados en incidencias (`RECIBIDO`, `VISTO`, `ASIGNADO`, `EN_CURSO`, `RESUELTO`), foto de cierre del operario, valoración ciudadana, botón *"Sigue sin funcionar"* (reapertura) y agrupación de duplicados (`< 150m`) con escalado automático de prioridad (`BAJA` a `EMERGENCIA_112`) y notificación a todos los reportantes.
+- [x] Bandeja de Cuarentena / Spam en `/admin` con motivo registrado y recuperación de avisos legítimos.
+- [x] Base de Conocimiento en `/admin` con subida `.pdf`/`.txt`/`.md` o texto/URL oficial, estado de vigencia (`VIGENTE` / `DEROGADA`), contador de usos en respuestas y botón de derogar en 1 clic.
+- [x] Sección de "FAQ Sugeridas" en `/admin` aprobables en 1 clic para responder en `0 tokens`.
+- [x] Botón *"Hablar con una persona"* en `/asistente` cuando el RAG no tenga respaldo y botón/comando *"Borrar mis datos"* en `/mi-perfil`.
+- [x] `README.md` completo, configuración Capacitor y despliegue en Vercel conectado a GitHub.

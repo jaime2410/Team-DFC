@@ -11,7 +11,7 @@ export interface FaqCacheResult {
 
 export interface ZeroTokenIntentResult {
   matched: boolean;
-  intent?: 'TRACK_INCIDENT' | 'GREETING';
+  intent?: 'TRACK_INCIDENT' | 'GREETING' | 'DELETE_DATA';
   answer?: string;
 }
 
@@ -24,7 +24,7 @@ interface FaqRow {
 interface IncidentLookupRow {
   tracking_code: string;
   title: string;
-  status: 'PENDIENTE' | 'EN_REVISION' | 'EN_CURSO' | 'RESUELTA';
+  status: string;
   department: string;
   address_label: string | null;
   urgency: string;
@@ -59,27 +59,43 @@ const GREETING_PHRASES = new Set([
 
 const STATUS_LABELS: Record<string, Record<string, string>> = {
   es: {
+    RECIBIDO: 'Recibido',
     PENDIENTE: 'Recibido (pendiente de revisión)',
-    EN_REVISION: 'En revisión por el equipo técnico',
+    VISTO: 'Visto por el Ayuntamiento',
+    EN_REVISION: 'Visto por el equipo técnico',
+    ASIGNADO: 'Asignado al departamento técnico',
     EN_CURSO: 'En curso de reparación',
+    RESUELTO: 'Resuelto',
     RESUELTA: 'Resuelto',
   },
   en: {
+    RECIBIDO: 'Received',
     PENDIENTE: 'Received (pending review)',
+    VISTO: 'Reviewed by Town Hall',
     EN_REVISION: 'Under review by the municipal team',
+    ASIGNADO: 'Assigned to department',
     EN_CURSO: 'In progress',
+    RESUELTO: 'Resolved',
     RESUELTA: 'Resolved',
   },
   fr: {
+    RECIBIDO: 'Reçu',
     PENDIENTE: 'Reçu (en attente)',
+    VISTO: 'Vu par la mairie',
     EN_REVISION: 'En cours d’examen',
+    ASIGNADO: 'Assigné au service technique',
     EN_CURSO: 'Intervention en cours',
+    RESUELTO: 'Résolu',
     RESUELTA: 'Résolu',
   },
   ar: {
+    RECIBIDO: 'تم الاستلام',
     PENDIENTE: 'تم الاستلام (قيد الانتظار)',
+    VISTO: 'تمت المراجعة',
     EN_REVISION: 'قيد المراجعة الفنية',
+    ASIGNADO: 'تم التعيين للقسم المختص',
     EN_CURSO: 'قيد التنفيذ',
+    RESUELTO: 'تم الحل',
     RESUELTA: 'تم الحل',
   },
 };
@@ -212,8 +228,27 @@ export async function detectZeroTokenIntent(
     };
   }
 
-  // 2. Saludos o cortesía breves (sin consulta real detrás)
+  // 2. Comando RGPD: Borrar mis datos (0 tokens)
   const normalized = normalizeQuestion(message);
+  if (
+    /\b(borrar mis datos|eliminar mis datos|borra mis datos|derecho al olvido|delete my data|supprimer mes donnees)\b/.test(
+      normalized
+    )
+  ) {
+    const deleteMap: Record<string, string> = {
+      es: `Para ejercer tu derecho al olvido (RGPD), entra en "Mi Perfil" (/mi-perfil) y pulsa el botón "Borrar mis datos". Eliminaremos al instante tu perfil, notificaciones y cuenta personal de ${municipality.name}.`,
+      en: `To exercise your GDPR right to erasure, open "My Profile" (/mi-perfil) and click "Delete my data". Your profile, notifications, and personal account in ${municipality.name} will be permanently removed.`,
+      fr: `Pour exercer votre droit à l'oubli (RGPD), rendez-vous dans « Mon Profil » (/mi-perfil) et cliquez sur « Supprimer mes données ».`,
+      ar: `لحذف بياناتك الشخصية فوراً، افتح صفحة "ملفي" (/mi-perfil) واضغط على زر "حذف بياناتي".`,
+    };
+    return {
+      matched: true,
+      intent: 'DELETE_DATA',
+      answer: deleteMap[lang] ?? deleteMap.es,
+    };
+  }
+
+  // 3. Saludos o cortesía breves (sin consulta real detrás)
   const words = normalized ? normalized.split(' ') : [];
   if (words.length > 0 && words.length <= 4 && GREETING_PHRASES.has(normalized)) {
     const greetingMap: Record<string, string> = {

@@ -3,18 +3,45 @@
 import React, { Suspense, useCallback, useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
-import { AlertTriangle, Mic, MicOff, Send, Square, Volume2 } from 'lucide-react';
+import {
+  AlertTriangle,
+  ExternalLink,
+  FileText,
+  Mic,
+  MicOff,
+  PhoneCall,
+  Send,
+  Square,
+  UserCheck,
+  Volume2,
+} from 'lucide-react';
 import { useTranslation } from '@/lib/i18n/I18nProvider';
 import { useMunicipality } from '@/lib/municipality/MunicipalityProvider';
+
+interface RagSourceDetail {
+  filename: string;
+  sourceUrl: string | null;
+  validUntil: string | null;
+  createdAt: string | null;
+  dateLabel: string;
+}
 
 interface ChatMessage {
   role: 'user' | 'assistant';
   content: string;
+  userQuestion?: string;
+  consultationId?: string;
   providerUsed?: string;
   tokensSaved?: boolean;
+  inputTokens?: number;
+  outputTokens?: number;
   usedRag?: boolean;
+  sourceDetails?: RagSourceDetail[];
   suggestIncident?: boolean;
   prefillDescription?: string | null;
+  suggestHumanEscalation?: boolean;
+  emergency112Alert?: boolean;
+  escalatedMsg?: string | null;
 }
 
 interface SpeechRecognitionLike {
@@ -43,6 +70,7 @@ function AssistantContent() {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
+  const [escalatingIdx, setEscalatingIdx] = useState<number | null>(null);
   const [listening, setListening] = useState(false);
   const [speakingIndex, setSpeakingIndex] = useState<number | null>(null);
   const [voiceSupported, setVoiceSupported] = useState(false);
@@ -99,11 +127,17 @@ function AssistantContent() {
         });
         const data = (await res.json()) as {
           answer?: string;
+          consultationId?: string;
           providerUsed?: string;
           tokensSaved?: boolean;
+          inputTokens?: number;
+          outputTokens?: number;
           usedRag?: boolean;
+          sourceDetails?: RagSourceDetail[];
           suggestIncident?: boolean;
           prefillDescription?: string | null;
+          suggestHumanEscalation?: boolean;
+          emergency112Alert?: boolean;
           error?: string;
         };
         if (!res.ok || !data.answer) throw new Error(data.error || 'error');
@@ -112,11 +146,18 @@ function AssistantContent() {
           {
             role: 'assistant',
             content: data.answer as string,
+            userQuestion: clean,
+            consultationId: data.consultationId,
             providerUsed: data.providerUsed,
             tokensSaved: data.tokensSaved,
+            inputTokens: data.inputTokens,
+            outputTokens: data.outputTokens,
             usedRag: data.usedRag,
+            sourceDetails: data.sourceDetails,
             suggestIncident: data.suggestIncident,
             prefillDescription: data.prefillDescription,
+            suggestHumanEscalation: data.suggestHumanEscalation,
+            emergency112Alert: data.emergency112Alert,
           },
         ]);
       } catch {
@@ -127,6 +168,37 @@ function AssistantContent() {
     },
     [loading, messages, muniSlug, lang, t]
   );
+
+  async function handleEscalateToHuman(index: number, msg: ChatMessage) {
+    if (escalatingIdx !== null) return;
+    setEscalatingIdx(index);
+    try {
+      const res = await fetch('/api/chat/escalate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          consultationId: msg.consultationId,
+          municipalityId: muniSlug,
+          question: msg.userQuestion || 'Consulta derivada a atención humana',
+        }),
+      });
+      const data = (await res.json()) as { message?: string };
+      setMessages((prev) =>
+        prev.map((m, idx) =>
+          idx === index
+            ? {
+                ...m,
+                escalatedMsg:
+                  data.message ||
+                  `Tu consulta se ha enviado al equipo de Atención Ciudadana de ${muniName}.`,
+              }
+            : m
+        )
+      );
+    } finally {
+      setEscalatingIdx(null);
+    }
+  }
 
   function toggleDictation() {
     if (listening) {
@@ -215,6 +287,16 @@ function AssistantContent() {
             key={i}
             className={`flex flex-col gap-3 ${m.role === 'user' ? 'items-end' : 'items-start'}`}
           >
+            {m.role === 'assistant' && m.emergency112Alert && (
+              <div
+                role="alert"
+                className="max-w-[92%] rounded-3xl bg-terracota text-tarjeta p-5 font-heading font-bold text-base shadow-md flex items-center gap-3 a11y-card"
+              >
+                <PhoneCall className="w-6 h-6 shrink-0" aria-hidden="true" />
+                <span>⚠️ Peligro inmediato: llama al 112 ahora mismo</span>
+              </div>
+            )}
+
             <div
               className={`max-w-[92%] rounded-3xl p-5 text-base leading-relaxed a11y-card ${
                 m.role === 'user'
@@ -223,6 +305,40 @@ function AssistantContent() {
               }`}
             >
               <p className="whitespace-pre-line">{m.content}</p>
+
+              {/* Fuentes oficiales RAG con fecha de vigencia y enlace clicable */}
+              {m.role === 'assistant' && m.sourceDetails && m.sourceDetails.length > 0 && (
+                <div className="mt-4 rounded-2xl bg-arena border border-superficie p-3.5 flex flex-col gap-2">
+                  <p className="text-xs font-bold uppercase tracking-wide text-verdeCabo flex items-center gap-1.5">
+                    <FileText className="w-3.5 h-3.5" aria-hidden="true" />
+                    <span>Fuentes oficiales verificadas ({muniName})</span>
+                  </p>
+                  <ul className="flex flex-col gap-1.5 text-xs text-tinta/85">
+                    {m.sourceDetails.map((src) => (
+                      <li
+                        key={src.filename}
+                        className="flex flex-wrap items-center justify-between gap-2"
+                      >
+                        <span className="font-semibold">
+                          {src.filename}{' '}
+                          <span className="text-tinta/65 font-normal">({src.dateLabel})</span>
+                        </span>
+                        {src.sourceUrl && (
+                          <a
+                            href={src.sourceUrl}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="inline-flex items-center gap-1 font-bold text-azulMed underline hover:opacity-80"
+                          >
+                            <span>Ver documento oficial</span>
+                            <ExternalLink className="w-3.5 h-3.5" aria-hidden="true" />
+                          </a>
+                        )}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
 
               {m.role === 'assistant' && (
                 <div className="mt-4 flex flex-wrap items-center gap-3">
@@ -243,9 +359,54 @@ function AssistantContent() {
                     )}
                     <span>{t('assistant.listen')}</span>
                   </button>
+
+                  {!m.suggestHumanEscalation && !m.escalatedMsg && (
+                    <button
+                      type="button"
+                      disabled={escalatingIdx === i}
+                      onClick={() => void handleEscalateToHuman(i, m)}
+                      className="inline-flex items-center gap-1.5 min-h-[40px] px-4 rounded-full bg-azulMed/15 text-azulMed text-sm font-semibold hover:bg-azulMed/25 transition-colors"
+                    >
+                      <UserCheck className="w-4 h-4" aria-hidden="true" />
+                      <span>Hablar con una persona</span>
+                    </button>
+                  )}
                 </div>
               )}
             </div>
+
+            {/* Tarjeta destacada "Hablar con una persona" cuando no hay respaldo RAG o se solicita */}
+            {m.role === 'assistant' && m.suggestHumanEscalation && !m.escalatedMsg && (
+              <div className="max-w-[92%] rounded-3xl bg-[#FDF5DF] border-2 border-solAlmeria p-5 flex flex-col gap-3 a11y-card">
+                <p className="font-heading font-bold text-lg text-tinta flex items-center gap-2">
+                  <UserCheck className="w-5 h-5 text-azulMed shrink-0" aria-hidden="true" />
+                  <span>¿Prefieres que te atienda un agente municipal?</span>
+                </p>
+                <p className="text-sm text-tinta/80">
+                  Esta consulta requiere revisión personal o no figura en las ordenanzas indexadas. Puedes derivarla en un clic a Atención Ciudadana de {muniName}.
+                </p>
+                <button
+                  type="button"
+                  disabled={escalatingIdx === i}
+                  onClick={() => void handleEscalateToHuman(i, m)}
+                  className="inline-flex items-center justify-center gap-2 min-h-[48px] px-6 rounded-2xl bg-azulMed text-tarjeta font-bold hover:opacity-95 transition-opacity self-start"
+                >
+                  <UserCheck className="w-5 h-5" aria-hidden="true" />
+                  <span>
+                    {escalatingIdx === i ? 'Derivando consulta...' : 'Hablar con una persona'}
+                  </span>
+                </button>
+              </div>
+            )}
+
+            {m.role === 'assistant' && m.escalatedMsg && (
+              <div
+                role="status"
+                className="max-w-[92%] rounded-3xl bg-azulMed text-tarjeta p-5 text-sm font-semibold a11y-card"
+              >
+                {m.escalatedMsg}
+              </div>
+            )}
 
             {m.role === 'assistant' && m.suggestIncident && (
               <div className="max-w-[92%] rounded-3xl bg-terracota text-tarjeta p-5 flex flex-col gap-3 a11y-card">

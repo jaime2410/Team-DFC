@@ -160,7 +160,9 @@
       "BAJA": "Baja",
       "MEDIA": "Media",
       "ALTA": "Alta",
-      "CRITICA": "Crítica"
+      "URGENTE": "Urgente",
+      "EMERGENCIA_112": "Emergencia 112",
+      "CRITICA": "Urgente"
     },
     "backHome": "Volver a la portada",
     "newReport": "Enviar otro aviso",

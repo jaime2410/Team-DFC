@@ -161,19 +161,21 @@ function evaluateAidAgainstProfile(
 
   if (reqs.large_family) {
     if (!isLargeFamily) return null;
-    reasons.push('Cumples el requisito de Familia Numerosa');
+    reasons.push('Podría encajar contigo por indicar Familia Numerosa en tu encuesta');
   }
 
   if (typeof reqs.min_household === 'number') {
     if (householdSize < reqs.min_household) return null;
-    reasons.push(`Vivienda de ${reqs.min_household} o más integrantes (${householdSize} en casa)`);
+    reasons.push(
+      `Podría encajar con tu hogar de ${householdSize} integrantes (orientativo: ${reqs.min_household}+ personas)`
+    );
   }
 
   if (reqs.has_children) {
     if (hasChildren) {
-      reasons.push('Hogar con menores o estudiantes en casa');
+      reasons.push('Podría encajar contigo al indicar menores o estudiantes en casa');
     } else if (isLargeFamily) {
-      reasons.push('Incluido por condición de Familia Numerosa');
+      reasons.push('Podría encajar con tu hogar por condición de Familia Numerosa');
     } else {
       return null;
     }
@@ -181,25 +183,25 @@ function evaluateAidAgainstProfile(
 
   if (reqs.has_seniors_or_dependents) {
     if (!hasSeniors) return null;
-    reasons.push('Hogar con personas mayores o dependientes');
+    reasons.push('Podría encajar con tu hogar al indicar mayores o personas dependientes');
   }
 
   if (reqs.reduced_mobility) {
     if (!hasReducedMobility) return null;
-    reasons.push('Apoyo para movilidad reducida y accesibilidad en vivienda');
+    reasons.push('Podría encajar contigo como apoyo orientativo para movilidad reducida');
   }
 
   if (reqs.max_income && reqs.max_income in INCOME_RANK) {
     if (INCOME_RANK[income] > INCOME_RANK[reqs.max_income]) return null;
     const incomeText =
       income === 'LOW'
-        ? 'tramo de renta reducida'
-        : 'tramo de renta media o reducida';
-    reasons.push(`Cumples el requisito de ${incomeText}`);
+        ? 'tramo orientativo de renta reducida'
+        : 'tramo orientativo de renta media o reducida';
+    reasons.push(`Encaja de forma orientativa con tu ${incomeText}`);
   }
 
   if (reasons.length === 0) {
-    reasons.push('Disponible para todos los hogares empadronados en el municipio');
+    reasons.push('Información general disponible para hogares del municipio');
   }
 
   return {

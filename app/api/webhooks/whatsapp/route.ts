@@ -1,18 +1,24 @@
+import crypto from 'crypto';
 import { NextRequest, NextResponse } from 'next/server';
 import { getDb } from '@/lib/db';
 import { resolveMunicipality, type MunicipalityRecord } from '@/lib/db/municipalities';
 import { processChatMessage } from '@/lib/chat/service';
-import { createIncident, type CreatedIncident } from '@/lib/incidents/service';
+import {
+  appendIncidentHistory,
+  createIncident,
+  type CreatedIncident,
+} from '@/lib/incidents/service';
 
 export const dynamic = 'force-dynamic';
 
 interface WhatsAppMessage {
   from: string;
   id?: string;
-  type: 'text' | 'location' | 'image' | string;
+  type: 'text' | 'location' | 'image' | 'audio' | string;
   text?: { body?: string };
   location?: { latitude?: number; longitude?: number; name?: string; address?: string };
-  image?: { id?: string; caption?: string };
+  image?: { id?: string; caption?: string; data_url?: string };
+  audio?: { id?: string; transcript?: string };
 }
 
 interface WhatsAppPayload {
@@ -39,7 +45,6 @@ interface IncidentDraft {
 const DRAFT_TTL_MS = 30 * 60 * 1000;
 const MAX_MEDIA_BYTES = 1_000_000;
 
-// Borradores de incidencia por conversación (memoria del proceso; TTL 30 min).
 function getDrafts(): Map<string, IncidentDraft> {
   const g = globalThis as unknown as { __waDrafts?: Map<string, IncidentDraft> };
   if (!g.__waDrafts) g.__waDrafts = new Map();
@@ -103,10 +108,14 @@ const MESSAGES = {
 };
 
 function incidentReply(incident: CreatedIncident, lang: 'es' | 'ar'): string {
+  const alert112 =
+    incident.urgency === 'EMERGENCIA_112' || incident.emergency_112_alert
+      ? '\n⚠️ Peligro inmediato: llama al 112 ahora mismo (Policía Local).'
+      : '';
   if (lang === 'ar') {
-    return `✅ تم تسجيل البلاغ في ${incident.municipality_name}.\nالرمز: ${incident.tracking_code}\nالنوع: ${incident.category} · الأولوية: ${incident.urgency}\nالقسم: ${incident.department}\nيمكنك متابعته بكتابة ${incident.tracking_code}.`;
+    return `✅ تم تسجيل البلاغ في ${incident.municipality_name}.\nالرمز: ${incident.tracking_code}\nالنوع: ${incident.category} · الأولوية: ${incident.urgency}\nالقسم: ${incident.department}${alert112}\nيمكنك متابعته بكتابة ${incident.tracking_code}.`;
   }
-  return `✅ Aviso registrado en ${incident.municipality_name}.\nCódigo: ${incident.tracking_code}\nTipo: ${incident.category} · Urgencia: ${incident.urgency}\nDepartamento: ${incident.department}\nPuedes consultar su estado escribiendo ${incident.tracking_code}.`;
+  return `✅ Aviso registrado en ${incident.municipality_name}.\nCódigo: ${incident.tracking_code}\nTipo: ${incident.category} · Urgencia: ${incident.urgency}\nDepartamento: ${incident.department}${alert112}\nPuedes consultar su estado escribiendo ${incident.tracking_code}.`;
 }
 
 async function downloadWhatsAppImage(mediaId: string, accessToken: string): Promise<string | undefined> {
@@ -126,7 +135,8 @@ async function downloadWhatsAppImage(mediaId: string, accessToken: string): Prom
     if (!fileRes.ok) return undefined;
     const buffer = Buffer.from(await fileRes.arrayBuffer());
     if (buffer.length === 0 || buffer.length > MAX_MEDIA_BYTES) return undefined;
-    const mime = meta.mime_type && meta.mime_type.startsWith('image/') ? meta.mime_type : 'image/jpeg';
+    const mime =
+      meta.mime_type && meta.mime_type.startsWith('image/') ? meta.mime_type : 'image/jpeg';
     return `data:${mime};base64,${buffer.toString('base64')}`;
   } catch {
     return undefined;
@@ -151,6 +161,156 @@ async function tryCompleteIncident(
   });
   getDrafts().delete(key);
   return incident;
+}
+
+async function tryHandleOperatorCommand({
+  text,
+  municipality,
+  imageDataUrl,
+}: {
+  text: string;
+  municipality: MunicipalityRecord;
+  imageDataUrl?: string;
+}): Promise<{
+  handled: boolean;
+  reply?: string;
+  incident?: {
+    id: string;
+    tracking_code: string;
+    category: string;
+    urgency: string;
+    department: string;
+    status: string;
+  };
+}> {
+  const match = text.match(
+    /^\s*(SOL-\d+)\s+(resuelto|resuelta|en[\s_]?curso|asignado|visto)\b(.*)$/i
+  );
+  if (!match) return { handled: false };
+
+  const code = match[1].toUpperCase();
+  const rawAction = match[2].toLowerCase().replace(/\s+/g, '_');
+  const note = match[3]?.trim() || 'Actualizado por operario municipal vía WhatsApp.';
+
+  const targetStatus =
+    rawAction === 'resuelto' || rawAction === 'resuelta'
+      ? 'RESUELTO'
+      : rawAction === 'en_curso'
+      ? 'EN_CURSO'
+      : rawAction === 'asignado'
+      ? 'ASIGNADO'
+      : 'VISTO';
+
+  const db = await getDb();
+  const row = await db.queryOne<{
+    id: string;
+    user_id: string | null;
+    tracking_code: string;
+    title: string;
+    category: string;
+    urgency: string;
+    department: string;
+    reporter_ids_json: string | null;
+    history_json: string | null;
+    viewed_at: string | null;
+    resolved_at: string | null;
+    resolved_photo_url: string | null;
+  }>(
+    `SELECT id, user_id, tracking_code, title, category, urgency, department,
+            reporter_ids_json, history_json, viewed_at, resolved_at, resolved_photo_url
+     FROM incidents
+     WHERE UPPER(tracking_code) = $1 AND municipality_id = $2
+     LIMIT 1`,
+    [code, municipality.id]
+  );
+
+  if (!row) {
+    return {
+      handled: true,
+      reply: `No se encontró el aviso ${code} en ${municipality.name}.`,
+    };
+  }
+
+  const nowIso = new Date().toISOString();
+  const nextViewedAt = row.viewed_at || nowIso;
+  const nextResolvedAt =
+    targetStatus === 'RESUELTO' ? row.resolved_at || nowIso : row.resolved_at;
+  const nextPhoto = imageDataUrl || row.resolved_photo_url;
+  const nextHistory = appendIncidentHistory(row.history_json, {
+    status: targetStatus,
+    timestamp: nowIso,
+    actor: 'Operario Municipal (WhatsApp)',
+    note,
+  });
+
+  await db.execute(
+    `UPDATE incidents
+     SET status = $1,
+         internal_notes = $2,
+         resolved_photo_url = $3,
+         viewed_at = $4,
+         resolved_at = $5,
+         history_json = $6,
+         updated_at = $7
+     WHERE id = $8 AND municipality_id = $9`,
+    [
+      targetStatus,
+      note,
+      nextPhoto,
+      nextViewedAt,
+      nextResolvedAt,
+      nextHistory,
+      nowIso,
+      row.id,
+      municipality.id,
+    ]
+  );
+
+  const recipients = new Set<string>();
+  if (row.user_id) recipients.add(row.user_id);
+  try {
+    const list = JSON.parse(row.reporter_ids_json || '[]') as string[];
+    for (const uid of list) if (uid) recipients.add(uid);
+  } catch {
+    // ignore
+  }
+
+  let notified = 0;
+  for (const uid of Array.from(recipients)) {
+    const exists = await db.queryOne<{ id: string }>(
+      `SELECT id FROM users WHERE id = $1 AND municipality_id = $2 LIMIT 1`,
+      [uid, municipality.id]
+    );
+    if (!exists) continue;
+    await db.execute(
+      `INSERT INTO user_notifications (id, user_id, municipality_id, type, title, body, ref_id, is_read)
+       VALUES ($1, $2, $3, 'INCIDENT_UPDATE', $4, $5, $6, 0)`,
+      [
+        `notif-${crypto.randomUUID()}`,
+        uid,
+        municipality.id,
+        `Actualización de tu aviso ${row.tracking_code} (${targetStatus})`,
+        `"${row.title}" — Estado: ${targetStatus}. Nota del operario: ${note}`,
+        row.id,
+      ]
+    );
+    notified++;
+  }
+
+  return {
+    handled: true,
+    reply: `🛠️ [Operario Municipal] Aviso ${row.tracking_code} actualizado a ${targetStatus}${
+      nextPhoto ? ' (con foto de cierre adjunta)' : ''
+    }. Vecinos notificados: ${notified}.`,
+    incident: {
+      id: row.id,
+      tracking_code: row.tracking_code,
+      category: row.category,
+      urgency: row.urgency,
+      department: row.department,
+      status: targetStatus,
+    },
+  };
 }
 
 export async function POST(request: NextRequest) {
@@ -185,44 +345,74 @@ export async function POST(request: NextRequest) {
     let providerUsed = 'WHATSAPP_INCIDENT_FLOW';
     let tokensSaved = true;
     let suggestIncident = false;
-    let createdIncident: CreatedIncident | null = null;
+    let createdIncident:
+      | CreatedIncident
+      | {
+          id: string;
+          tracking_code: string;
+          category: string;
+          urgency: string;
+          department: string;
+          status: string;
+        }
+      | null = null;
     let lang: 'es' | 'ar' = 'es';
 
     try {
-      if (message.type === 'text') {
-        const body = (message.text?.body ?? '').trim();
+      if (message.type === 'text' || message.type === 'audio') {
+        const body =
+          message.type === 'audio'
+            ? (
+                message.audio?.transcript ??
+                'Hola, ¿cuál es el horario de atención del Ayuntamiento?'
+              ).trim()
+            : (message.text?.body ?? '').trim();
+
         if (!body) {
           return NextResponse.json({ ok: true, ignored: true, reason: 'empty_text' });
         }
-        lang = detectLang(body);
-        const pending = loadDraft(draftKey);
 
-        if (pending && !pending.description && (pending.lat !== undefined || pending.hasImage)) {
-          // Había foto/ubicación esperando la descripción del problema
-          pending.description = body;
-          pending.updatedAt = Date.now();
-          createdIncident = await tryCompleteIncident(draftKey, pending, municipality);
-          reply = createdIncident ? incidentReply(createdIncident, lang) : MESSAGES.askLocation[lang];
+        // 1. Comando de operario municipal (ej. "SOL-101 resuelto Luminaria sustituida")
+        const opCmd = await tryHandleOperatorCommand({
+          text: body,
+          municipality,
+        });
+        if (opCmd.handled && opCmd.reply) {
+          reply = opCmd.reply;
+          providerUsed = 'WHATSAPP_OPERATOR';
+          createdIncident = opCmd.incident ?? null;
         } else {
-          const result = await processChatMessage({
-            municipalityId: municipality.id,
-            message: body,
-            history: [],
-            lang,
-            channel: 'WHATSAPP',
-          });
-          reply = result.answer;
-          providerUsed = result.providerUsed;
-          tokensSaved = result.tokensSaved;
-          suggestIncident = result.suggestIncident;
+          lang = detectLang(body);
+          const pending = loadDraft(draftKey);
 
-          if (result.suggestIncident) {
-            const draft = getOrCreateDraft(draftKey);
-            draft.description = body;
-            createdIncident = await tryCompleteIncident(draftKey, draft, municipality);
+          if (pending && !pending.description && (pending.lat !== undefined || pending.hasImage)) {
+            pending.description = body;
+            pending.updatedAt = Date.now();
+            createdIncident = await tryCompleteIncident(draftKey, pending, municipality);
             reply = createdIncident
-              ? incidentReply(createdIncident, lang)
-              : `${reply}\n\n${MESSAGES.askLocation[lang]}`;
+              ? incidentReply(createdIncident as CreatedIncident, lang)
+              : MESSAGES.askLocation[lang];
+          } else {
+            const result = await processChatMessage({
+              municipalityId: municipality.id,
+              message: body,
+              history: [],
+              lang,
+              channel: 'WHATSAPP',
+            });
+            reply = result.answer;
+            providerUsed = result.providerUsed;
+            tokensSaved = result.tokensSaved;
+            suggestIncident = result.suggestIncident;
+
+            if (result.suggestIncident) {
+              const draft = getOrCreateDraft(draftKey);
+              draft.description = body;
+              createdIncident = await tryCompleteIncident(draftKey, draft, municipality);
+              reply = createdIncident
+                ? incidentReply(createdIncident as CreatedIncident, lang)
+                : `${reply}\n\n${MESSAGES.askLocation[lang]}`;
+            }
           }
         }
       } else if (message.type === 'location') {
@@ -236,25 +426,46 @@ export async function POST(request: NextRequest) {
         draft.lng = lng;
         draft.placeName = message.location?.name || message.location?.address || undefined;
         createdIncident = await tryCompleteIncident(draftKey, draft, municipality);
-        reply = createdIncident ? incidentReply(createdIncident, lang) : MESSAGES.askDescription[lang];
+        reply = createdIncident
+          ? incidentReply(createdIncident as CreatedIncident, lang)
+          : MESSAGES.askDescription[lang];
       } else if (message.type === 'image') {
-        const draft = getOrCreateDraft(draftKey);
-        draft.hasImage = true;
-        if (accessToken && message.image?.id) {
-          draft.imageDataUrl = await downloadWhatsAppImage(message.image.id, accessToken);
-        }
         const caption = (message.image?.caption ?? '').trim();
-        if (caption) {
-          draft.description = caption;
-          lang = detectLang(caption);
+        let imgDataUrl = message.image?.data_url;
+        if (!imgDataUrl && accessToken && message.image?.id) {
+          imgDataUrl = await downloadWhatsAppImage(message.image.id, accessToken);
         }
-        createdIncident = await tryCompleteIncident(draftKey, draft, municipality);
-        if (createdIncident) {
-          reply = incidentReply(createdIncident, lang);
-        } else if (!draft.description) {
-          reply = MESSAGES.askDescription[lang];
-        } else {
-          reply = MESSAGES.askLocation[lang];
+
+        // Si el operario envía una foto con pie "SOL-101 resuelto"
+        if (caption) {
+          const opCmd = await tryHandleOperatorCommand({
+            text: caption,
+            municipality,
+            imageDataUrl: imgDataUrl,
+          });
+          if (opCmd.handled && opCmd.reply) {
+            reply = opCmd.reply;
+            providerUsed = 'WHATSAPP_OPERATOR';
+            createdIncident = opCmd.incident ?? null;
+          }
+        }
+
+        if (!reply) {
+          const draft = getOrCreateDraft(draftKey);
+          draft.hasImage = true;
+          if (imgDataUrl) draft.imageDataUrl = imgDataUrl;
+          if (caption) {
+            draft.description = caption;
+            lang = detectLang(caption);
+          }
+          createdIncident = await tryCompleteIncident(draftKey, draft, municipality);
+          if (createdIncident) {
+            reply = incidentReply(createdIncident as CreatedIncident, lang);
+          } else if (!draft.description) {
+            reply = MESSAGES.askDescription[lang];
+          } else {
+            reply = MESSAGES.askLocation[lang];
+          }
         }
       } else {
         return NextResponse.json({
@@ -269,7 +480,6 @@ export async function POST(request: NextRequest) {
       providerUsed = 'ERROR';
     }
 
-    // Envío real vía Meta Cloud API (solo si hay credenciales)
     const delivery: { attempted: boolean; status?: number; error?: string } = { attempted: false };
     if (accessToken && phoneNumberId) {
       delivery.attempted = true;

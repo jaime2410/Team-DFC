@@ -1,8 +1,18 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getDb } from '@/lib/db';
 import { resolveMunicipality } from '@/lib/db/municipalities';
+import { getSession } from '@/lib/auth/session';
+import { escalateUrgencyByUpvotes } from '@/lib/incidents/service';
 
 export const dynamic = 'force-dynamic';
+
+interface UpvoteRow {
+  id: string;
+  tracking_code: string;
+  upvotes: number;
+  urgency: string;
+  reporter_ids_json: string | null;
+}
 
 export async function POST(
   request: NextRequest,
@@ -18,6 +28,7 @@ export async function POST(
     }
 
     const db = await getDb();
+    const session = await getSession();
     const idOrCode = decodeURIComponent(params.id).trim();
 
     let municipalityId: string | null = null;
@@ -34,28 +45,47 @@ export async function POST(
       : `(id = $1 OR UPPER(tracking_code) = UPPER($2))`;
     const args = municipalityId ? [idOrCode, idOrCode, municipalityId] : [idOrCode, idOrCode];
 
-    const res = await db.execute(
-      `UPDATE incidents
-       SET upvotes = upvotes + 1,
-           updated_at = to_char(NOW() AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"')
-       WHERE ${where}`,
+    const existing = await db.queryOne<UpvoteRow>(
+      `SELECT id, tracking_code, upvotes, urgency, reporter_ids_json
+       FROM incidents
+       WHERE ${where}
+       LIMIT 1`,
       args
     );
 
-    if (res.changes === 0) {
+    if (!existing) {
       return NextResponse.json({ error: 'Aviso no encontrado.' }, { status: 404 });
     }
 
-    const row = await db.queryOne<{ id: string; tracking_code: string; upvotes: number }>(
-      `SELECT id, tracking_code, upvotes FROM incidents WHERE ${where}`,
-      args
+    const nextUpvotes = Number(existing.upvotes ?? 1) + 1;
+    const nextUrgency = escalateUrgencyByUpvotes(existing.urgency, nextUpvotes);
+
+    let reporterIds: string[] = [];
+    try {
+      reporterIds = JSON.parse(existing.reporter_ids_json || '[]') as string[];
+    } catch {
+      reporterIds = [];
+    }
+    if (session?.userId && !reporterIds.includes(session.userId)) {
+      reporterIds.push(session.userId);
+    }
+
+    await db.execute(
+      `UPDATE incidents
+       SET upvotes = $1,
+           urgency = $2,
+           reporter_ids_json = $3,
+           updated_at = to_char(NOW() AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"')
+       WHERE id = $4`,
+      [nextUpvotes, nextUrgency, JSON.stringify(reporterIds), existing.id]
     );
 
     return NextResponse.json({
       ok: true,
-      id: row?.id,
-      tracking_code: row?.tracking_code,
-      upvotes: row?.upvotes,
+      id: existing.id,
+      tracking_code: existing.tracking_code,
+      upvotes: nextUpvotes,
+      urgency: nextUrgency,
     });
   } catch (error) {
     console.error('Error upvoting incident:', error);

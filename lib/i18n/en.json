@@ -160,7 +160,9 @@
       "BAJA": "Low",
       "MEDIA": "Medium",
       "ALTA": "High",
-      "CRITICA": "Critical"
+      "URGENTE": "Urgent",
+      "EMERGENCIA_112": "Emergency 112",
+      "CRITICA": "Urgent"
     },
     "backHome": "Back to home",
     "newReport": "Send another report",

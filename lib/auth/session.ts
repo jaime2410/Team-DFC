@@ -1,5 +1,6 @@
 import { SignJWT, jwtVerify } from 'jose';
 import { cookies } from 'next/headers';
+import { NextResponse } from 'next/server';
 
 export type UserRole = 'CITIZEN' | 'ADMIN' | 'DEPARTMENT';
 
@@ -85,4 +86,27 @@ export async function getSession(): Promise<SessionUser | null> {
   } catch {
     return null;
   }
+}
+
+export async function requireAdminSession(): Promise<
+  | { authorized: true; session: SessionUser }
+  | { authorized: false; response: NextResponse }
+> {
+  const session = await getSession();
+  if (!session) {
+    return {
+      authorized: false,
+      response: NextResponse.json({ error: 'No autenticado.' }, { status: 401 }),
+    };
+  }
+  if (session.role !== 'ADMIN' && session.role !== 'DEPARTMENT') {
+    return {
+      authorized: false,
+      response: NextResponse.json(
+        { error: 'Acceso restringido a administradores municipales.' },
+        { status: 403 }
+      ),
+    };
+  }
+  return { authorized: true, session };
 }

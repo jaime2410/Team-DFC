@@ -8,6 +8,9 @@ export interface RetrievedChunk {
   filename: string;
   content: string;
   score: number;
+  sourceUrl?: string | null;
+  validUntil?: string | null;
+  createdAt?: string | null;
 }
 
 export interface IngestDocumentInput {
@@ -16,6 +19,9 @@ export interface IngestDocumentInput {
   docType: string;
   text: string;
   uploadedBy?: string | null;
+  sourceUrl?: string | null;
+  status?: 'VIGENTE' | 'DEROGADA';
+  validUntil?: string | null;
 }
 
 export interface IngestDocumentResult {
@@ -24,6 +30,8 @@ export interface IngestDocumentResult {
   filename: string;
   charCount: number;
   chunkCount: number;
+  status: 'VIGENTE' | 'DEROGADA';
+  validUntil: string | null;
 }
 
 interface FtsChunkRow {
@@ -33,6 +41,9 @@ interface FtsChunkRow {
   filename: string;
   content: string;
   pg_rank?: number;
+  source_url?: string | null;
+  valid_until?: string | null;
+  created_at?: string | null;
 }
 
 interface VectorChunkRow {
@@ -42,6 +53,9 @@ interface VectorChunkRow {
   filename: string;
   content: string;
   score: number;
+  source_url?: string | null;
+  valid_until?: string | null;
+  created_at?: string | null;
 }
 
 const STOPWORDS = new Set([
@@ -215,6 +229,11 @@ export async function ingestDocument(
 
   const chunks = chunkText(cleanText, 350, 40);
   const documentId = `doc-${crypto.randomUUID()}`;
+  const docStatus: 'VIGENTE' | 'DEROGADA' =
+    input.status === 'DEROGADA' ? 'DEROGADA' : 'VIGENTE';
+  const validUntil = input.validUntil?.trim() ? input.validUntil.trim() : null;
+  const sourceUrl = input.sourceUrl?.trim() ? input.sourceUrl.trim() : null;
+
   const geminiKey = await getGeminiEmbeddingKey(db, municipality.id);
 
   const vectors: Array<string | null> = [];
@@ -229,13 +248,18 @@ export async function ingestDocument(
 
   await db.withTransaction(async (tx) => {
     await tx.execute(
-      `INSERT INTO rag_documents (id, municipality_id, filename, doc_type, char_count, chunk_count, uploaded_by)
-       VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+      `INSERT INTO rag_documents (
+         id, municipality_id, filename, doc_type, source_url, status, valid_until,
+         usage_count, char_count, chunk_count, uploaded_by
+       ) VALUES ($1, $2, $3, $4, $5, $6, $7, 0, $8, $9, $10)`,
       [
         documentId,
         municipality.id,
         input.filename,
         input.docType.toUpperCase(),
+        sourceUrl,
+        docStatus,
+        validUntil,
         cleanText.length,
         chunks.length,
         input.uploadedBy ?? null,
@@ -266,6 +290,8 @@ export async function ingestDocument(
     filename: input.filename,
     charCount: cleanText.length,
     chunkCount: chunks.length,
+    status: docStatus,
+    validUntil,
   };
 }
 
@@ -327,22 +353,40 @@ async function ensureMissingChunkEmbeddings(
   }
 }
 
+async function incrementDocumentUsage(
+  db: DbClient,
+  municipalityId: string,
+  chunks: RetrievedChunk[]
+): Promise<void> {
+  const docIds = Array.from(new Set(chunks.map((c) => c.documentId)));
+  for (const docId of docIds) {
+    await db.execute(
+      `UPDATE rag_documents
+       SET usage_count = COALESCE(usage_count, 0) + 1
+       WHERE id = $1 AND municipality_id = $2`,
+      [docId, municipalityId]
+    );
+  }
+}
+
 export async function retrieveContext({
   municipalityId,
   query,
   topK = 3,
   maxChars = 1800,
+  trackUsage = true,
 }: {
   municipalityId: string;
   query: string;
   topK?: number;
   maxChars?: number;
+  trackUsage?: boolean;
 }): Promise<RetrievedChunk[]> {
   const db = await getDb();
   const municipality = await resolveMunicipality(db, municipalityId);
   if (!municipality) return [];
 
-  // 1. Búsqueda vectorial real con pgvector (<=> similitud coseno + índice HNSW) cuando exista GEMINI_API_KEY
+  // 1. Búsqueda vectorial real con pgvector (<=> similitud coseno + índice HNSW) sobre documentos VIGENTES
   const geminiKey = await getGeminiEmbeddingKey(db, municipality.id);
   if (geminiKey) {
     await ensureMissingChunkEmbeddings(db, municipality.id, geminiKey);
@@ -351,11 +395,15 @@ export async function retrieveContext({
 
     if (queryVecLiteral) {
       const vecRows = await db.query<VectorChunkRow>(
-        `SELECT chunk_id, document_id, municipality_id, filename, content,
-                (1 - (embedding <=> $2::vector))::float8 AS score
-         FROM rag_chunks
-         WHERE municipality_id = $1 AND embedding IS NOT NULL
-         ORDER BY embedding <=> $2::vector ASC
+        `SELECT c.chunk_id, c.document_id, c.municipality_id, c.filename, c.content,
+                d.source_url, d.valid_until, d.created_at,
+                (1 - (c.embedding <=> $2::vector))::float8 AS score
+         FROM rag_chunks c
+         JOIN rag_documents d ON d.id = c.document_id
+         WHERE c.municipality_id = $1
+           AND c.embedding IS NOT NULL
+           AND COALESCE(d.status, 'VIGENTE') = 'VIGENTE'
+         ORDER BY c.embedding <=> $2::vector ASC
          LIMIT $3`,
         [municipality.id, queryVecLiteral, Math.max(topK * 2, 6)]
       );
@@ -369,26 +417,36 @@ export async function retrieveContext({
             filename: r.filename,
             content: r.content,
             score: Number(Number(r.score).toFixed(4)),
+            sourceUrl: r.source_url ?? null,
+            validUntil: r.valid_until ?? null,
+            createdAt: r.created_at ?? null,
           }));
         if (mapped.length > 0) {
-          return selectWithinBudget(mapped, topK, maxChars);
+          const selected = selectWithinBudget(mapped, topK, maxChars);
+          if (trackUsage && selected.length > 0) {
+            await incrementDocumentUsage(db, municipality.id, selected);
+          }
+          return selected;
         }
       }
     }
   }
 
-  // 2. Respaldo automático: búsqueda textual en PostgreSQL (ts_rank_cd + BM25) filtrada por municipality_id
+  // 2. Respaldo automático: búsqueda textual en PostgreSQL (ts_rank_cd + BM25) filtrada por municipality_id y VIGENTE
   const queryTokens = Array.from(new Set(tokenizeForSearch(query)));
   if (queryTokens.length === 0) return [];
 
   const rows = await db.query<FtsChunkRow>(
-    `SELECT chunk_id, document_id, municipality_id, filename, content,
+    `SELECT c.chunk_id, c.document_id, c.municipality_id, c.filename, c.content,
+            d.source_url, d.valid_until, d.created_at,
             ts_rank_cd(
-              to_tsvector('spanish', filename || ' ' || content),
+              to_tsvector('spanish', c.filename || ' ' || c.content),
               plainto_tsquery('spanish', $2)
             )::float8 AS pg_rank
-     FROM rag_chunks_fts
-     WHERE municipality_id = $1`,
+     FROM rag_chunks_fts c
+     JOIN rag_documents d ON d.id = c.document_id
+     WHERE c.municipality_id = $1
+       AND COALESCE(d.status, 'VIGENTE') = 'VIGENTE'`,
     [municipality.id, query]
   );
 
@@ -470,10 +528,17 @@ export async function retrieveContext({
         filename: row.filename,
         content: row.content,
         score: Number(score.toFixed(4)),
+        sourceUrl: row.source_url ?? null,
+        validUntil: row.valid_until ?? null,
+        createdAt: row.created_at ?? null,
       });
     }
   }
 
   scored.sort((a, b) => b.score - a.score);
-  return selectWithinBudget(scored, topK, maxChars);
+  const selected = selectWithinBudget(scored, topK, maxChars);
+  if (trackUsage && selected.length > 0) {
+    await incrementDocumentUsage(db, municipality.id, selected);
+  }
+  return selected;
 }

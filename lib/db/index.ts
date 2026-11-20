@@ -408,6 +408,85 @@ async function initSchema(db: DbClient): Promise<void> {
     CREATE INDEX IF NOT EXISTS idx_rag_fts_embedding_hnsw
       ON rag_chunks_fts USING hnsw (embedding vector_cosine_ops);
   `);
+
+  // Migraciones incrementales seguras (FASE 6 — Rúbrica Reto 2) sin pérdida de datos
+  await db.execute(`ALTER TABLE incidents ADD COLUMN IF NOT EXISTS reporter_ids_json TEXT NOT NULL DEFAULT '[]';`);
+  await db.execute(`ALTER TABLE incidents ADD COLUMN IF NOT EXISTS citizen_rating INTEGER;`);
+  await db.execute(`ALTER TABLE incidents ADD COLUMN IF NOT EXISTS citizen_feedback TEXT;`);
+  await db.execute(`ALTER TABLE incidents ADD COLUMN IF NOT EXISTS reopened_count INTEGER NOT NULL DEFAULT 0;`);
+  await db.execute(`ALTER TABLE incidents ADD COLUMN IF NOT EXISTS is_quarantined INTEGER NOT NULL DEFAULT 0;`);
+  await db.execute(`ALTER TABLE incidents ADD COLUMN IF NOT EXISTS quarantine_reason TEXT;`);
+
+  await db.execute(`ALTER TABLE incidents DROP CONSTRAINT IF EXISTS incidents_status_check;`);
+  await db.execute(`ALTER TABLE incidents DROP CONSTRAINT IF EXISTS incidents_urgency_check;`);
+
+  await db.execute(`UPDATE incidents SET status = 'RECIBIDO' WHERE status = 'PENDIENTE';`);
+  await db.execute(`UPDATE incidents SET status = 'VISTO' WHERE status = 'EN_REVISION';`);
+  await db.execute(`UPDATE incidents SET status = 'RESUELTO' WHERE status = 'RESUELTA';`);
+  await db.execute(`UPDATE incidents SET urgency = 'URGENTE' WHERE urgency = 'CRITICA';`);
+  await db.execute(`
+    UPDATE incidents
+    SET reporter_ids_json = '["' || user_id || '"]'
+    WHERE user_id IS NOT NULL AND (reporter_ids_json IS NULL OR reporter_ids_json = '[]');
+  `);
+
+  await db.execute(`
+    ALTER TABLE incidents ADD CONSTRAINT incidents_status_check
+      CHECK (status IN ('RECIBIDO', 'VISTO', 'ASIGNADO', 'EN_CURSO', 'RESUELTO', 'PENDIENTE', 'EN_REVISION', 'RESUELTA'));
+  `);
+  await db.execute(`
+    ALTER TABLE incidents ADD CONSTRAINT incidents_urgency_check
+      CHECK (urgency IN ('BAJA', 'MEDIA', 'ALTA', 'URGENTE', 'EMERGENCIA_112', 'CRITICA'));
+  `);
+
+  await db.execute(`ALTER TABLE rag_documents ADD COLUMN IF NOT EXISTS source_url TEXT;`);
+  await db.execute(`ALTER TABLE rag_documents ADD COLUMN IF NOT EXISTS status TEXT NOT NULL DEFAULT 'VIGENTE';`);
+  await db.execute(`ALTER TABLE rag_documents ADD COLUMN IF NOT EXISTS valid_until TEXT;`);
+  await db.execute(`ALTER TABLE rag_documents ADD COLUMN IF NOT EXISTS usage_count INTEGER NOT NULL DEFAULT 0;`);
+
+  await db.execute(`ALTER TABLE consultations ADD COLUMN IF NOT EXISTS escalated_to_human INTEGER NOT NULL DEFAULT 0;`);
+  await db.execute(`ALTER TABLE consultations ADD COLUMN IF NOT EXISTS rag_doc_ids_json TEXT NOT NULL DEFAULT '[]';`);
+  await db.execute(`ALTER TABLE consultations ADD COLUMN IF NOT EXISTS input_tokens INTEGER NOT NULL DEFAULT 0;`);
+  await db.execute(`ALTER TABLE consultations ADD COLUMN IF NOT EXISTS output_tokens INTEGER NOT NULL DEFAULT 0;`);
+  await db.execute(`ALTER TABLE consultations ADD COLUMN IF NOT EXISTS human_answer TEXT;`);
+  await db.execute(`ALTER TABLE consultations ADD COLUMN IF NOT EXISTS answered_by TEXT;`);
+  await db.execute(`ALTER TABLE consultations ADD COLUMN IF NOT EXISTS answered_at TEXT;`);
+
+  await db.execute(`ALTER TABLE incidents ADD COLUMN IF NOT EXISTS viewed_at TEXT;`);
+  await db.execute(`ALTER TABLE incidents ADD COLUMN IF NOT EXISTS resolved_at TEXT;`);
+  await db.execute(`ALTER TABLE incidents ADD COLUMN IF NOT EXISTS history_json TEXT NOT NULL DEFAULT '[]';`);
+
+  // Backfill de tiempos reales e historial de auditoría para incidencias sembradas
+  await db.execute(`
+    UPDATE incidents
+    SET viewed_at = created_at
+    WHERE viewed_at IS NULL AND status IN ('VISTO', 'ASIGNADO', 'EN_CURSO', 'RESUELTO');
+  `);
+  await db.execute(`
+    UPDATE incidents
+    SET resolved_at = updated_at
+    WHERE resolved_at IS NULL AND status = 'RESUELTO';
+  `);
+  await db.execute(`
+    UPDATE incidents
+    SET history_json = json_build_array(
+      json_build_object(
+        'status', 'RECIBIDO',
+        'timestamp', created_at,
+        'actor', 'Sistema Municipal',
+        'note', 'Aviso registrado en el municipio.'
+      ),
+      json_build_object(
+        'status', status,
+        'timestamp', updated_at,
+        'actor', department,
+        'note', COALESCE(NULLIF(internal_notes, ''), 'Estado actual: ' || status)
+      )
+    )::text
+    WHERE history_json IS NULL OR history_json = '[]';
+  `);
+
+  await db.execute(`ALTER TABLE faq_cache ADD COLUMN IF NOT EXISTS approved_by_admin INTEGER NOT NULL DEFAULT 1;`);
 }
 
 export async function getDb(): Promise<DbClient> {

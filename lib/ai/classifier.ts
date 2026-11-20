@@ -9,7 +9,13 @@ export const INCIDENT_CATEGORIES = [
   'Otros',
 ] as const;
 
-export const INCIDENT_URGENCIES = ['BAJA', 'MEDIA', 'ALTA', 'CRITICA'] as const;
+export const INCIDENT_URGENCIES = [
+  'BAJA',
+  'MEDIA',
+  'ALTA',
+  'URGENTE',
+  'EMERGENCIA_112',
+] as const;
 
 export const INCIDENT_DEPARTMENTS = [
   'Electricidad',
@@ -18,6 +24,9 @@ export const INCIDENT_DEPARTMENTS = [
   'Aguas y Mantenimiento',
   'Medio Ambiente',
   'Atención Ciudadana',
+  'Policía Local',
+  'Deportes',
+  'Fiestas',
 ] as const;
 
 export type IncidentCategory = (typeof INCIDENT_CATEGORIES)[number];
@@ -32,6 +41,9 @@ export interface IncidentClassification {
   aiReasoning: string;
   providerUsed: string;
   fallbackTriggered: boolean;
+  imageDescription: string | null;
+  photoMatchesText: boolean;
+  detectedRisk: boolean;
 }
 
 const CATEGORY_DEPARTMENT: Record<IncidentCategory, IncidentDepartment> = {
@@ -43,17 +55,35 @@ const CATEGORY_DEPARTMENT: Record<IncidentCategory, IncidentDepartment> = {
   Otros: 'Atención Ciudadana',
 };
 
+const IMMEDIATE_DANGER_REGEX =
+  /(112|incendio|fuego|humo|derrumbe|cable|electro|explosi|herido|inundacion|accidente grave)/i;
+
 const SYSTEM_PROMPT =
   'Eres un clasificador de incidencias urbanas de un ayuntamiento. ' +
   'Responde ÚNICAMENTE con un objeto JSON válido, sin texto adicional, con los campos: ' +
-  '{"title","category","urgency","department","aiReasoning"}. ' +
+  '{"title","category","urgency","department","aiReasoning","imageDescription","photoMatchesText","detectedRisk"}. ' +
   `category debe ser uno de: ${INCIDENT_CATEGORIES.join(' | ')}. ` +
   `urgency debe ser uno de: ${INCIDENT_URGENCIES.join(' | ')}. ` +
   `department debe ser uno de: ${INCIDENT_DEPARTMENTS.join(' | ')}. ` +
-  'title: máximo 80 caracteres. aiReasoning: una frase breve que justifique la urgencia.';
+  'photoMatchesText (boolean): true si la imagen coincide con el texto o no hay imagen; false si contradice el texto. ' +
+  'detectedRisk (boolean): true si se observa riesgo físico o emergencia.';
 
 function isOneOf<T extends readonly string[]>(list: T, value: unknown): value is T[number] {
   return typeof value === 'string' && (list as readonly string[]).includes(value);
+}
+
+function normalizeUrgency(raw: unknown): IncidentUrgency | null {
+  if (raw === 'CRITICA') return 'URGENTE';
+  if (isOneOf(INCIDENT_URGENCIES, raw)) return raw;
+  return null;
+}
+
+export function hasImmediateDangerKeywords(text: string): boolean {
+  const norm = text
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '');
+  return IMMEDIATE_DANGER_REGEX.test(norm);
 }
 
 function extractJson(text: string): Record<string, unknown> | null {
@@ -74,14 +104,38 @@ function localClassification(description: string, hasImage: boolean): Omit<
 > {
   const parsed = extractJson(classifyLocally(description, hasImage)) ?? {};
   const category = isOneOf(INCIDENT_CATEGORIES, parsed.category) ? parsed.category : 'Otros';
+  const danger = hasImmediateDangerKeywords(description);
+  let urgency = normalizeUrgency(parsed.urgency) ?? 'MEDIA';
+  const detectedRisk = Boolean(parsed.detectedRisk) || danger;
+
+  if (danger) {
+    urgency = 'EMERGENCIA_112';
+  } else if (detectedRisk && (urgency === 'BAJA' || urgency === 'MEDIA')) {
+    urgency = 'URGENTE';
+  }
+
+  let department: IncidentDepartment = isOneOf(INCIDENT_DEPARTMENTS, parsed.department)
+    ? parsed.department
+    : CATEGORY_DEPARTMENT[category];
+
+  if (urgency === 'EMERGENCIA_112') {
+    department = 'Policía Local';
+  }
+
   return {
-    title: typeof parsed.title === 'string' && parsed.title ? parsed.title.slice(0, 80) : 'Incidencia ciudadana',
+    title:
+      typeof parsed.title === 'string' && parsed.title
+        ? parsed.title.slice(0, 80)
+        : 'Incidencia ciudadana',
     category,
-    urgency: isOneOf(INCIDENT_URGENCIES, parsed.urgency) ? parsed.urgency : 'MEDIA',
-    department: isOneOf(INCIDENT_DEPARTMENTS, parsed.department)
-      ? parsed.department
-      : CATEGORY_DEPARTMENT[category],
+    urgency,
+    department,
     aiReasoning: typeof parsed.aiReasoning === 'string' ? parsed.aiReasoning : '',
+    imageDescription:
+      typeof parsed.imageDescription === 'string' ? parsed.imageDescription : null,
+    photoMatchesText:
+      typeof parsed.photoMatchesText === 'boolean' ? parsed.photoMatchesText : true,
+    detectedRisk,
   };
 }
 
@@ -96,7 +150,9 @@ export async function classifyIncident({
   imageBase64?: string;
   categoryHint?: string;
 }): Promise<IncidentClassification> {
-  const promptText = categoryHint ? `${description}\n(Tipo indicado por el vecino: ${categoryHint})` : description;
+  const promptText = categoryHint
+    ? `${description}\n(Tipo indicado por el vecino: ${categoryHint})`
+    : description;
 
   const ai = await runAITask({
     municipalityId,
@@ -107,30 +163,47 @@ export async function classifyIncident({
   });
 
   const parsed = extractJson(ai.text);
-  if (
-    parsed &&
-    isOneOf(INCIDENT_CATEGORIES, parsed.category) &&
-    isOneOf(INCIDENT_URGENCIES, parsed.urgency)
-  ) {
+  const parsedUrgency = parsed ? normalizeUrgency(parsed.urgency) : null;
+  if (parsed && isOneOf(INCIDENT_CATEGORIES, parsed.category) && parsedUrgency) {
     const category = parsed.category;
+    const danger = hasImmediateDangerKeywords(promptText);
+    const detectedRisk = Boolean(parsed.detectedRisk) || danger;
+    let urgency: IncidentUrgency = parsedUrgency;
+    if (danger) {
+      urgency = 'EMERGENCIA_112';
+    } else if (detectedRisk && (urgency === 'BAJA' || urgency === 'MEDIA')) {
+      urgency = 'URGENTE';
+    }
+
+    let department: IncidentDepartment = isOneOf(INCIDENT_DEPARTMENTS, parsed.department)
+      ? parsed.department
+      : CATEGORY_DEPARTMENT[category];
+    if (urgency === 'EMERGENCIA_112') {
+      department = 'Policía Local';
+    }
+
     return {
       title:
         typeof parsed.title === 'string' && parsed.title.trim()
           ? parsed.title.trim().slice(0, 80)
           : description.slice(0, 80),
       category,
-      urgency: parsed.urgency,
-      department: isOneOf(INCIDENT_DEPARTMENTS, parsed.department)
-        ? parsed.department
-        : CATEGORY_DEPARTMENT[category],
+      urgency,
+      department,
       aiReasoning:
         typeof parsed.aiReasoning === 'string' ? parsed.aiReasoning.trim().slice(0, 240) : '',
       providerUsed: ai.providerUsed,
       fallbackTriggered: ai.fallbackTriggered,
+      imageDescription:
+        typeof parsed.imageDescription === 'string'
+          ? parsed.imageDescription.slice(0, 240)
+          : null,
+      photoMatchesText:
+        typeof parsed.photoMatchesText === 'boolean' ? parsed.photoMatchesText : true,
+      detectedRisk,
     };
   }
 
-  // JSON inválido o motor LOCAL: clasificador determinista por palabras clave
   const local = localClassification(promptText, Boolean(imageBase64));
   return {
     ...local,

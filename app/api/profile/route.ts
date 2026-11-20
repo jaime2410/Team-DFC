@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getDb } from '@/lib/db';
 import { resolveMunicipality } from '@/lib/db/municipalities';
-import { getSession } from '@/lib/auth/session';
+import { clearSessionCookie, getSession } from '@/lib/auth/session';
+import { normalizeIncidentStatus, parseIncidentHistory } from '@/lib/incidents/service';
 import {
   matchAidsForProfile,
   matchStreetAlertsForProfile,
@@ -51,6 +52,11 @@ interface UserIncidentRow {
   department: string;
   status: string;
   internal_notes: string | null;
+  resolved_photo_url: string | null;
+  citizen_rating: number | null;
+  viewed_at: string | null;
+  resolved_at: string | null;
+  history_json: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -112,7 +118,8 @@ async function buildProfilePayload(userId: string, municipalityId: string) {
     ),
     db.query<UserIncidentRow>(
       `SELECT id, tracking_code, title, description, address_label, category,
-              urgency, department, status, internal_notes, created_at, updated_at
+              urgency, department, status, internal_notes, resolved_photo_url,
+              citizen_rating, viewed_at, resolved_at, history_json, created_at, updated_at
        FROM incidents
        WHERE user_id = $1 AND municipality_id = $2
        ORDER BY created_at DESC
@@ -120,6 +127,12 @@ async function buildProfilePayload(userId: string, municipalityId: string) {
       [userId, municipality.id]
     ),
   ]);
+
+  const formattedIncidents = myIncidents.map((inc) => ({
+    ...inc,
+    status: normalizeIncidentStatus(inc.status),
+    history: parseIncidentHistory(inc.history_json),
+  }));
 
   return {
     municipality: {
@@ -145,7 +158,7 @@ async function buildProfilePayload(userId: string, municipalityId: string) {
     matchedAids,
     matchingStreetAlerts,
     notifications,
-    myIncidents,
+    myIncidents: formattedIncidents,
   };
 }
 
@@ -255,6 +268,42 @@ export async function PUT(request: NextRequest) {
     console.error('Error in PUT /api/profile:', error);
     return NextResponse.json(
       { error: 'No se pudo guardar tu perfil.' },
+      { status: 500 }
+    );
+  }
+}
+
+export async function DELETE() {
+  try {
+    const session = await getSession();
+    if (!session) {
+      return NextResponse.json({ error: 'No autenticado.' }, { status: 401 });
+    }
+
+    const db = await getDb();
+    await db.withTransaction(async (tx) => {
+      await tx.execute(`DELETE FROM user_notifications WHERE user_id = $1`, [
+        session.userId,
+      ]);
+      await tx.execute(`DELETE FROM citizen_profiles WHERE user_id = $1`, [
+        session.userId,
+      ]);
+      await tx.execute(`UPDATE incidents SET user_id = NULL WHERE user_id = $1`, [
+        session.userId,
+      ]);
+      await tx.execute(`DELETE FROM users WHERE id = $1`, [session.userId]);
+    });
+
+    clearSessionCookie();
+
+    return NextResponse.json({
+      ok: true,
+      message: 'Tus datos personales, perfil y notificaciones han sido eliminados conforme al RGPD.',
+    });
+  } catch (error) {
+    console.error('Error in DELETE /api/profile:', error);
+    return NextResponse.json(
+      { error: 'No se pudieron borrar tus datos.' },
       { status: 500 }
     );
   }

@@ -160,7 +160,9 @@
       "BAJA": "Faible",
       "MEDIA": "Moyenne",
       "ALTA": "Élevée",
-      "CRITICA": "Critique"
+      "URGENTE": "Urgente",
+      "EMERGENCIA_112": "Urgence 112",
+      "CRITICA": "Urgente"
     },
     "backHome": "Retour à l’accueil",
     "newReport": "Envoyer un autre signalement",
