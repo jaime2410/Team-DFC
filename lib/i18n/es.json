@@ -78,5 +78,39 @@
       "location": "Ubicación",
       "note": "Última actualización"
     }
+  },
+  "assistant": {
+    "title": "Asistente del Ayuntamiento",
+    "subtitle": "Pregunta con tus palabras. Respondo con la información oficial de {municipality}.",
+    "placeholder": "Escribe tu pregunta aquí...",
+    "send": "Enviar",
+    "thinking": "Pensando la respuesta...",
+    "faqTitle": "Preguntas frecuentes",
+    "faq1": "¿Cuál es el horario del Ayuntamiento?",
+    "faq2": "¿Cómo pido un certificado de empadronamiento?",
+    "faq3": "¿Qué ayudas hay para familias numerosas?",
+    "faq4": "¿Cuándo recogen muebles y enseres?",
+    "listen": "Escuchar respuesta",
+    "dictate": "Dictar por voz",
+    "dictating": "Escuchando...",
+    "error": "No he podido responder ahora mismo. Inténtalo de nuevo en unos segundos.",
+    "incidentCardTitle": "Parece un problema en tu calle. ¿Quieres avisar al Ayuntamiento?",
+    "incidentCardCta": "Avisar de este problema ahora",
+    "badgeCache": "Caché 0 tokens",
+    "badgeIntent": "Respuesta directa 0 tokens",
+    "badgeRag": "RAG Oficial"
+  },
+  "whatsappDemo": {
+    "title": "Simulador de WhatsApp",
+    "subtitle": "Envía mensajes reales en formato Meta Cloud API al webhook de {municipality} y mira la respuesta.",
+    "contact": "Ayuntamiento de {municipality}",
+    "placeholder": "Escribe un mensaje",
+    "send": "Enviar",
+    "sendPhoto": "Foto",
+    "sendLocation": "Ubicación GPS",
+    "photoLabel": "📷 Foto enviada",
+    "locationLabel": "📍 Ubicación GPS compartida",
+    "payloadTitle": "Payload enviado al webhook",
+    "responseTitle": "Respuesta del webhook"
   }
 }

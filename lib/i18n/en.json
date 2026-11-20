@@ -78,5 +78,39 @@
       "location": "Location",
       "note": "Latest update"
     }
+  },
+  "assistant": {
+    "title": "Town Hall Assistant",
+    "subtitle": "Ask in your own words. I answer using official information from {municipality}.",
+    "placeholder": "Type your question here...",
+    "send": "Send",
+    "thinking": "Thinking about the answer...",
+    "faqTitle": "Frequently asked questions",
+    "faq1": "What are the Town Hall opening hours?",
+    "faq2": "How do I request a registration certificate?",
+    "faq3": "What grants exist for large families?",
+    "faq4": "When is furniture collected?",
+    "listen": "Listen to answer",
+    "dictate": "Dictate by voice",
+    "dictating": "Listening...",
+    "error": "I could not answer right now. Please try again in a few seconds.",
+    "incidentCardTitle": "This looks like a street problem. Do you want to notify the Town Hall?",
+    "incidentCardCta": "Report this problem now",
+    "badgeCache": "Cache 0 tokens",
+    "badgeIntent": "Direct answer 0 tokens",
+    "badgeRag": "Official RAG"
+  },
+  "whatsappDemo": {
+    "title": "WhatsApp Simulator",
+    "subtitle": "Send real Meta Cloud API payloads to the {municipality} webhook and see the response.",
+    "contact": "Town Hall of {municipality}",
+    "placeholder": "Type a message",
+    "send": "Send",
+    "sendPhoto": "Photo",
+    "sendLocation": "GPS location",
+    "photoLabel": "📷 Photo sent",
+    "locationLabel": "📍 GPS location shared",
+    "payloadTitle": "Payload sent to webhook",
+    "responseTitle": "Webhook response"
   }
 }

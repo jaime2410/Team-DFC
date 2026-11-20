@@ -78,5 +78,39 @@
       "location": "Lieu",
       "note": "Dernière mise à jour"
     }
+  },
+  "assistant": {
+    "title": "Assistant de la Mairie",
+    "subtitle": "Posez votre question avec vos mots. Je réponds avec les informations officielles de {municipality}.",
+    "placeholder": "Écrivez votre question ici...",
+    "send": "Envoyer",
+    "thinking": "Je réfléchis à la réponse...",
+    "faqTitle": "Questions fréquentes",
+    "faq1": "Quels sont les horaires de la Mairie ?",
+    "faq2": "Comment demander un certificat de résidence ?",
+    "faq3": "Quelles aides existent pour les familles nombreuses ?",
+    "faq4": "Quand ramasse-t-on les meubles ?",
+    "listen": "Écouter la réponse",
+    "dictate": "Dicter à voix haute",
+    "dictating": "Écoute...",
+    "error": "Je n’ai pas pu répondre pour le moment. Réessayez dans quelques secondes.",
+    "incidentCardTitle": "Cela ressemble à un problème dans votre rue. Voulez-vous prévenir la Mairie ?",
+    "incidentCardCta": "Signaler ce problème maintenant",
+    "badgeCache": "Cache 0 jeton",
+    "badgeIntent": "Réponse directe 0 jeton",
+    "badgeRag": "RAG Officiel"
+  },
+  "whatsappDemo": {
+    "title": "Simulateur WhatsApp",
+    "subtitle": "Envoyez de vrais payloads Meta Cloud API au webhook de {municipality} et voyez la réponse.",
+    "contact": "Mairie de {municipality}",
+    "placeholder": "Écrivez un message",
+    "send": "Envoyer",
+    "sendPhoto": "Photo",
+    "sendLocation": "Position GPS",
+    "photoLabel": "📷 Photo envoyée",
+    "locationLabel": "📍 Position GPS partagée",
+    "payloadTitle": "Payload envoyé au webhook",
+    "responseTitle": "Réponse du webhook"
   }
 }

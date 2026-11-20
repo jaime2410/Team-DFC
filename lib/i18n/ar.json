@@ -78,5 +78,39 @@
       "location": "الموقع",
       "note": "آخر تحديث"
     }
+  },
+  "assistant": {
+    "title": "مساعد البلدية",
+    "subtitle": "اسأل بكلماتك. أجيب بالمعلومات الرسمية لبلدية {municipality}.",
+    "placeholder": "اكتب سؤالك هنا...",
+    "send": "إرسال",
+    "thinking": "أفكر في الإجابة...",
+    "faqTitle": "الأسئلة الشائعة",
+    "faq1": "ما هي مواعيد عمل البلدية؟",
+    "faq2": "كيف أطلب شهادة السكن؟",
+    "faq3": "ما هي المساعدات المتاحة للأسر الكبيرة؟",
+    "faq4": "متى يتم جمع الأثاث القديم؟",
+    "listen": "استمع للإجابة",
+    "dictate": "إملاء صوتي",
+    "dictating": "جارٍ الاستماع...",
+    "error": "لم أتمكن من الإجابة الآن. حاول مرة أخرى بعد ثوانٍ.",
+    "incidentCardTitle": "يبدو أنها مشكلة في شارعك. هل تريد إبلاغ البلدية؟",
+    "incidentCardCta": "الإبلاغ عن هذه المشكلة الآن",
+    "badgeCache": "ذاكرة مؤقتة 0 رموز",
+    "badgeIntent": "رد مباشر 0 رموز",
+    "badgeRag": "مصدر رسمي (RAG)"
+  },
+  "whatsappDemo": {
+    "title": "محاكي واتساب",
+    "subtitle": "أرسل رسائل بصيغة Meta Cloud API الحقيقية إلى webhook بلدية {municipality} وشاهد الرد.",
+    "contact": "بلدية {municipality}",
+    "placeholder": "اكتب رسالة",
+    "send": "إرسال",
+    "sendPhoto": "صورة",
+    "sendLocation": "موقع GPS",
+    "photoLabel": "📷 تم إرسال صورة",
+    "locationLabel": "📍 تمت مشاركة الموقع",
+    "payloadTitle": "الحمولة المرسلة إلى webhook",
+    "responseTitle": "رد webhook"
   }
 }
