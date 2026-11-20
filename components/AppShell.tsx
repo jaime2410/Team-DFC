@@ -1,7 +1,8 @@
 'use client';
 
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
+import { usePathname } from 'next/navigation';
 import {
   Accessibility,
   BookOpen,
@@ -9,6 +10,7 @@ import {
   Contrast,
   Globe,
   MapPin,
+  ShieldCheck,
   Sun,
   Type,
   UserCircle2,
@@ -22,11 +24,21 @@ interface A11yState {
   easyRead: boolean;
 }
 
+interface AuthSessionInfo {
+  userId: string;
+  name: string;
+  email: string;
+  role: 'CITIZEN' | 'ADMIN' | 'DEPARTMENT';
+  municipalitySlug: string;
+  municipalityName: string;
+}
+
 const A11Y_STORAGE_KEY = 'almeriacerca_a11y';
 
 export function AppShell({ children }: { children: React.ReactNode }) {
   const { lang, setLang, t } = useTranslation();
   const { municipalities, currentMunicipality, setMunicipalityBySlug } = useMunicipality();
+  const pathname = usePathname();
 
   const [a11yOpen, setA11yOpen] = useState(false);
   const [a11y, setA11y] = useState<A11yState>({
@@ -34,7 +46,34 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     highContrast: false,
     easyRead: false,
   });
+  const [sessionUser, setSessionUser] = useState<AuthSessionInfo | null>(null);
   const menuRef = useRef<HTMLDivElement>(null);
+
+  const fetchSession = useCallback(async () => {
+    try {
+      const res = await fetch('/api/auth/me', { cache: 'no-store' });
+      if (!res.ok) {
+        setSessionUser(null);
+        return;
+      }
+      const data = (await res.json()) as { user?: AuthSessionInfo | null };
+      setSessionUser(data.user ?? null);
+    } catch {
+      setSessionUser(null);
+    }
+  }, []);
+
+  useEffect(() => {
+    void fetchSession();
+  }, [fetchSession, pathname]);
+
+  useEffect(() => {
+    const handler = () => {
+      void fetchSession();
+    };
+    window.addEventListener('almeriacerca-auth-changed', handler);
+    return () => window.removeEventListener('almeriacerca-auth-changed', handler);
+  }, [fetchSession]);
 
   useEffect(() => {
     try {
@@ -77,6 +116,8 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   }, [a11yOpen]);
 
   const activeCount = [a11y.largeText, a11y.highContrast, a11y.easyRead].filter(Boolean).length;
+  const isAdmin =
+    sessionUser?.role === 'ADMIN' || sessionUser?.role === 'DEPARTMENT';
 
   return (
     <div className="min-h-screen flex flex-col bg-arena text-tinta">
@@ -241,13 +282,25 @@ export function AppShell({ children }: { children: React.ReactNode }) {
               )}
             </div>
 
+            {isAdmin && (
+              <Link
+                href="/admin"
+                className="inline-flex items-center gap-2 rounded-2xl px-4 py-2 min-h-[44px] text-sm font-semibold bg-tinta text-tarjeta hover:opacity-95 transition-opacity shadow-sm"
+              >
+                <ShieldCheck className="w-4 h-4 shrink-0" aria-hidden="true" />
+                <span>{t('nav.adminPanel')}</span>
+              </Link>
+            )}
+
             {/* Enlace limpio Entrar / Mi Perfil */}
             <Link
               href="/mi-perfil"
               className="inline-flex items-center gap-2 rounded-2xl px-4 py-2 min-h-[44px] text-sm font-semibold bg-buganvilla text-tarjeta hover:opacity-95 transition-opacity shadow-sm"
             >
               <UserCircle2 className="w-4 h-4 shrink-0" aria-hidden="true" />
-              <span>{t('nav.loginOrProfile')}</span>
+              <span className="max-w-[160px] truncate">
+                {sessionUser ? sessionUser.name : t('nav.loginOrProfile')}
+              </span>
             </Link>
           </nav>
         </div>

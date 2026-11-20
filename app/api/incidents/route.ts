@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createIncident, IncidentInputError } from '@/lib/incidents/service';
+import { getSession } from '@/lib/auth/session';
 
 export const dynamic = 'force-dynamic';
 
@@ -15,16 +16,16 @@ export async function POST(request: NextRequest) {
       categoryHint?: string;
     };
 
-    // user_id se asociará a la sesión activa cuando exista autenticación (FASE 5).
+    const session = await getSession();
     const incident = await createIncident({
-      municipalityId: body.municipalityId ?? '',
+      municipalityId: body.municipalityId || session?.municipalitySlug || '',
       description: body.description ?? '',
       lat: Number(body.lat),
       lng: Number(body.lng),
       addressLabel: body.addressLabel,
       imageBase64: body.imageBase64,
       categoryHint: body.categoryHint,
-      userId: null,
+      userId: session?.userId ?? null,
       channel: 'WEB',
     });
 
