@@ -13,16 +13,70 @@
     "adminPanel": "Panneau Admin",
     "closeMenu": "Fermer"
   },
-  "phase0": {
-    "badge": "Commune active",
-    "welcomeTitle": "Bienvenue à {municipality}",
-    "welcomeSubtitle": "Votre canal direct et simple avec la Mairie de {municipality} ({province}). Changez de commune, de langue ou activez les aides visuelles ci-dessus.",
-    "streetsTitle": "Rues configurées dans cette commune",
-    "statusTitle": "État d'accessibilité et de langue",
-    "langActive": "Langue active",
-    "directionActive": "Sens du texte",
-    "a11yActive": "Modes actifs",
-    "a11yNone": "Standard",
-    "dbReady": "Base de données multi-communes prête"
+  "home": {
+    "greetingBadge": "Accès libre · Sans inscription",
+    "heroTitle": "Mairie de {municipality}",
+    "heroSubtitle": "Tout ce qui se passe dans votre commune en langage simple : posez vos questions, signalez un souci ou découvrez les aides.",
+    "actionsTitle": "Comment pouvons-nous vous aider ?",
+    "cardAskTitle": "Demander à la Mairie",
+    "cardAskDesc": "Réponses immédiates sur les horaires, démarches, inscription ou aides locales.",
+    "cardAskCta": "Ouvrir l'assistant",
+    "cardReportTitle": "Signaler un problème",
+    "cardReportDesc": "Lampadaire éteint, nid-de-poule, fuite d'eau ou propreté. Envoyez un avis en 3 étapes simples.",
+    "cardReportCta": "Envoyer un avis",
+    "cardTrackTitle": "Suivre mon signalement",
+    "cardTrackDesc": "Saisissez votre code {sample} pour voir l'avancement en direct.",
+    "cardTrackCta": "Vérifier le code",
+    "personalizeBadge": "Optionnel · Sur mesure",
+    "personalizeTitle": "Activer les alertes de ma rue et mes aides",
+    "personalizeDesc": "Optionnel : indiquez votre rue et la composition de votre foyer pour recevoir les avis de coupures et les aides adaptées.",
+    "personalizeCta": "Configurer mes alertes",
+    "boardTitle": "Tableau de {municipality}",
+    "boardSubtitle": "Coupures de rue, aides ouvertes, réparations récentes et fiches pratiques.",
+    "filters": {
+      "all": "Tout",
+      "alerts": "Rues et Avis",
+      "aids": "Aides",
+      "resolved": "Réparé",
+      "procedures": "Démarches"
+    },
+    "cardTags": {
+      "alert": "Alerte rue",
+      "aid": "Aide",
+      "resolved": "Réparé",
+      "procedure": "Démarche"
+    },
+    "cardTapHint": "Touchez pour voir les détails",
+    "emptyBoard": "Aucune publication dans cette catégorie pour le moment.",
+    "detailModal": {
+      "affectedStreets": "Rues concernées",
+      "dates": "Dates prévues",
+      "deadline": "Date limite",
+      "department": "Service chargé",
+      "location": "Rue / Zone",
+      "municipalNote": "Note municipale",
+      "askAssistant": "Demander à l'assistant à ce sujet",
+      "close": "Fermer"
+    },
+    "trackModal": {
+      "title": "Suivre mon signalement",
+      "subtitle": "Saisissez votre code de suivi (sans connexion requise).",
+      "placeholder": "Ex : SOL-101",
+      "searchBtn": "Rechercher",
+      "searching": "Recherche...",
+      "trySamples": "Essayez avec un code de la commune :",
+      "notFound": "Aucun signalement trouvé avec ce code dans cette commune.",
+      "steps": {
+        "received": "Reçu",
+        "review": "En examen",
+        "inProgress": "En cours",
+        "resolved": "Résolu"
+      },
+      "category": "Catégorie",
+      "urgency": "Priorité",
+      "department": "Service",
+      "location": "Lieu",
+      "note": "Dernière mise à jour"
+    }
   }
 }

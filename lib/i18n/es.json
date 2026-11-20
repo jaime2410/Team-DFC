@@ -13,16 +13,70 @@
     "adminPanel": "Panel Admin",
     "closeMenu": "Cerrar"
   },
-  "phase0": {
-    "badge": "Municipio activo",
-    "welcomeTitle": "Bienvenido a {municipality}",
-    "welcomeSubtitle": "Tu canal directo y sencillo con el Ayuntamiento de {municipality} ({province}). Cambia de pueblo, idioma o activa las ayudas visuales arriba en cualquier momento.",
-    "streetsTitle": "Calles configuradas en este municipio",
-    "statusTitle": "Estado de accesibilidad e idioma",
-    "langActive": "Idioma activo",
-    "directionActive": "Dirección del texto",
-    "a11yActive": "Modos activos",
-    "a11yNone": "Estándar",
-    "dbReady": "Base de datos multi-municipio lista"
+  "home": {
+    "greetingBadge": "Acceso libre · Sin registro",
+    "heroTitle": "Ayuntamiento de {municipality}",
+    "heroSubtitle": "Todo lo que necesitas de tu pueblo en palabras claras: pregunta dudas, avisa de averías o consulta ayudas.",
+    "actionsTitle": "¿En qué podemos ayudarte hoy?",
+    "cardAskTitle": "Preguntar al Ayuntamiento",
+    "cardAskDesc": "Dudas sobre papeles, horarios, empadronamiento o ayudas municipales al instante.",
+    "cardAskCta": "Ir al asistente",
+    "cardReportTitle": "Avisar de un problema",
+    "cardReportDesc": "Farola apagada, bache, fuga de agua o limpieza. Envía un aviso en 3 pasos fáciles.",
+    "cardReportCta": "Enviar aviso",
+    "cardTrackTitle": "Ver cómo va mi aviso",
+    "cardTrackDesc": "Escribe tu código {sample} y comprueba al momento si ya está en marcha o resuelto.",
+    "cardTrackCta": "Consultar código",
+    "personalizeBadge": "Opcional · A tu medida",
+    "personalizeTitle": "Activar avisos de mi calle y mis ayudas",
+    "personalizeDesc": "Es opcional: cuéntanos en qué calle vives y cómo es tu hogar para avisarte de cortes cercanos y descuentos pensados para ti.",
+    "personalizeCta": "Personalizar mis avisos",
+    "boardTitle": "Tablón de {municipality}",
+    "boardSubtitle": "Avisos de calles, ayudas abiertas, arreglos recientes y guías rápidas del municipio.",
+    "filters": {
+      "all": "Todo",
+      "alerts": "Cortes y Avisos",
+      "aids": "Ayudas",
+      "resolved": "Arreglado",
+      "procedures": "Trámites"
+    },
+    "cardTags": {
+      "alert": "Corte / Aviso",
+      "aid": "Ayuda abierta",
+      "resolved": "Arreglado",
+      "procedure": "Trámite útil"
+    },
+    "cardTapHint": "Toca para ver detalles",
+    "emptyBoard": "No hay publicaciones en esta categoría ahora mismo.",
+    "detailModal": {
+      "affectedStreets": "Calles afectadas",
+      "dates": "Fechas previstas",
+      "deadline": "Plazo de solicitud",
+      "department": "Equipo encargado",
+      "location": "Calle o zona",
+      "municipalNote": "Nota del Ayuntamiento",
+      "askAssistant": "Preguntar al asistente sobre esto",
+      "close": "Cerrar"
+    },
+    "trackModal": {
+      "title": "Ver cómo va mi aviso",
+      "subtitle": "Introduce el código de seguimiento (sin necesidad de iniciar sesión).",
+      "placeholder": "Ej: SOL-101",
+      "searchBtn": "Buscar aviso",
+      "searching": "Consultando...",
+      "trySamples": "Prueba con un código del municipio:",
+      "notFound": "No hemos encontrado ese código en este municipio.",
+      "steps": {
+        "received": "Recibido",
+        "review": "En revisión",
+        "inProgress": "En curso",
+        "resolved": "Resuelto"
+      },
+      "category": "Tipo",
+      "urgency": "Prioridad",
+      "department": "Departamento",
+      "location": "Ubicación",
+      "note": "Última actualización"
+    }
   }
 }

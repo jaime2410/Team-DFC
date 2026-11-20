@@ -13,16 +13,70 @@
     "adminPanel": "Admin Panel",
     "closeMenu": "Close"
   },
-  "phase0": {
-    "badge": "Active municipality",
-    "welcomeTitle": "Welcome to {municipality}",
-    "welcomeSubtitle": "Your direct and simple channel with the Town Hall of {municipality} ({province}). Switch town, language, or visual aids at the top anytime.",
-    "streetsTitle": "Configured streets in this town",
-    "statusTitle": "Accessibility & language status",
-    "langActive": "Active language",
-    "directionActive": "Text direction",
-    "a11yActive": "Active modes",
-    "a11yNone": "Standard",
-    "dbReady": "Multi-town database ready"
+  "home": {
+    "greetingBadge": "Open access · No sign-up needed",
+    "heroTitle": "Town Hall of {municipality}",
+    "heroSubtitle": "Everything happening in your town in plain language: ask questions, report street issues, or explore grants.",
+    "actionsTitle": "How can we help you today?",
+    "cardAskTitle": "Ask the Town Hall",
+    "cardAskDesc": "Get instant answers about opening hours, registration, paperwork, or local grants.",
+    "cardAskCta": "Open assistant",
+    "cardReportTitle": "Report a problem",
+    "cardReportDesc": "Broken streetlight, pothole, water leak, or street cleaning. Report it in 3 easy steps.",
+    "cardReportCta": "Send report",
+    "cardTrackTitle": "Check my report",
+    "cardTrackDesc": "Enter your tracking code like {sample} to see progress in real time.",
+    "cardTrackCta": "Check code",
+    "personalizeBadge": "Optional · Tailored to you",
+    "personalizeTitle": "Turn on alerts for my street & grants",
+    "personalizeDesc": "Optional: tell us your street and household details to get local road closure alerts and grants matched to your home.",
+    "personalizeCta": "Set my alerts",
+    "boardTitle": "{municipality} Community Board",
+    "boardSubtitle": "Street alerts, active grants, recent fixes, and helpful town guides.",
+    "filters": {
+      "all": "All",
+      "alerts": "Street Alerts",
+      "aids": "Grants",
+      "resolved": "Fixed",
+      "procedures": "Procedures"
+    },
+    "cardTags": {
+      "alert": "Street Alert",
+      "aid": "Grant",
+      "resolved": "Fixed",
+      "procedure": "Town Guide"
+    },
+    "cardTapHint": "Tap for details",
+    "emptyBoard": "No cards in this category right now.",
+    "detailModal": {
+      "affectedStreets": "Affected streets",
+      "dates": "Schedule",
+      "deadline": "Deadline",
+      "department": "Assigned team",
+      "location": "Street / Area",
+      "municipalNote": "Town Hall note",
+      "askAssistant": "Ask the assistant about this",
+      "close": "Close"
+    },
+    "trackModal": {
+      "title": "Check my report",
+      "subtitle": "Type your tracking code below (no login required).",
+      "placeholder": "e.g. SOL-101",
+      "searchBtn": "Look up",
+      "searching": "Checking...",
+      "trySamples": "Try a sample code from this town:",
+      "notFound": "No report found with that code in this town.",
+      "steps": {
+        "received": "Received",
+        "review": "In review",
+        "inProgress": "In progress",
+        "resolved": "Resolved"
+      },
+      "category": "Category",
+      "urgency": "Priority",
+      "department": "Department",
+      "location": "Location",
+      "note": "Latest update"
+    }
   }
 }

@@ -13,16 +13,70 @@
     "adminPanel": "لوحة الإدارة",
     "closeMenu": "إغلاق"
   },
-  "phase0": {
-    "badge": "البلدية النشطة",
-    "welcomeTitle": "مرحباً بكم في {municipality}",
-    "welcomeSubtitle": "قناتك المباشرة والبسيطة مع بلدية {municipality} ({province}). يمكنك تغيير البلدية أو اللغة أو تفعيل أدوات المساعدة البصرية من الأعلى في أي وقت.",
-    "streetsTitle": "الشوارع المسجلة في هذه البلدية",
-    "statusTitle": "حالة اللغة وإمكانية الوصول",
-    "langActive": "اللغة النشطة",
-    "directionActive": "اتجاه النص",
-    "a11yActive": "الأوضاع النشطة",
-    "a11yNone": "قياسي",
-    "dbReady": "قاعدة البيانات متعددة البلديات جاهزة"
+  "home": {
+    "greetingBadge": "دخول مفتوح · بدون تسجيل",
+    "heroTitle": "بلدية {municipality}",
+    "heroSubtitle": "كل ما تحتاجه في بلدتك بلغة واضحة وبسيطة: اسأل عن المعاملات، أبلغ عن عطل، أو تصفح المساعدات.",
+    "actionsTitle": "كيف يمكننا مساعدتك اليوم؟",
+    "cardAskTitle": "اسأل البلدية",
+    "cardAskDesc": "إجابات فورية حول مواعيد العمل، السجل المدني، المعاملات أو المساعدات البلدية.",
+    "cardAskCta": "فتح المساعد",
+    "cardReportTitle": "الإبلاغ عن مشكلة",
+    "cardReportDesc": "إنارة معطلة، حفرة في الشارع، تسرب مياه أو نظافة. أرسل بلاغك في 3 خطوات سهلة.",
+    "cardReportCta": "إرسال بلاغ",
+    "cardTrackTitle": "متابعة حالة بلاغي",
+    "cardTrackDesc": "أدخل رمزك مثل {sample} لمعرفة مرحلة معالجة البلاغ فوراً.",
+    "cardTrackCta": "البحث بالرمز",
+    "personalizeBadge": "اختياري · مخصص لك",
+    "personalizeTitle": "تفعيل تنبيهات شارعي والمساعدات",
+    "personalizeDesc": "اختياري: أخبرنا باسم شارعك ووضع أسرتك لتصلك تنبيهات إغلاق الطرق والمنح المناسبة لك.",
+    "personalizeCta": "ضبط التنبيهات",
+    "boardTitle": "لوحة {municipality}",
+    "boardSubtitle": "تنبيهات الشوارع، المساعدات المفتوحة، الإصلاحات الأخيرة وأدلة المعاملات.",
+    "filters": {
+      "all": "الكل",
+      "alerts": "تنبيهات الطرق",
+      "aids": "المساعدات",
+      "resolved": "تم الإصلاح",
+      "procedures": "المعاملات"
+    },
+    "cardTags": {
+      "alert": "تنبيه شارع",
+      "aid": "مساعدة",
+      "resolved": "تم الإصلاح",
+      "procedure": "دليل بلدي"
+    },
+    "cardTapHint": "اضغط لعرض التفاصيل",
+    "emptyBoard": "لا توجد بطاقات في هذا القسم حالياً.",
+    "detailModal": {
+      "affectedStreets": "الشوارع المتأثرة",
+      "dates": "التواريخ المتوقعة",
+      "deadline": "آخر موعد",
+      "department": "القسم المختص",
+      "location": "الموقع",
+      "municipalNote": "ملاحظة البلدية",
+      "askAssistant": "اسأل المساعد حول هذا الموضوع",
+      "close": "إغلاق"
+    },
+    "trackModal": {
+      "title": "متابعة حالة بلاغي",
+      "subtitle": "أدخل رمز المتابعة (لا يلزم تسجيل الدخول).",
+      "placeholder": "مثال: SOL-101",
+      "searchBtn": "بحث",
+      "searching": "جارٍ البحث...",
+      "trySamples": "جرّب رمزاً من هذه البلدية:",
+      "notFound": "لم يتم العثور على بلاغ بهذا الرمز في هذه البلدية.",
+      "steps": {
+        "received": "تم الاستلام",
+        "review": "قيد المراجعة",
+        "inProgress": "قيد التنفيذ",
+        "resolved": "تم الحل"
+      },
+      "category": "النوع",
+      "urgency": "الأولوية",
+      "department": "القسم",
+      "location": "الموقع",
+      "note": "آخر تحديث"
+    }
   }
 }

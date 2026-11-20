@@ -399,11 +399,12 @@ function populateDatabase(db: DbClient): void {
       );
     });
 
+    const featuredAlertStreet = m.slug === 'nijar' ? m.streets[2] : m.streets[0];
     const alerts = [
       {
-        title: `Corte temporal por mejoras en ${m.streets[0]}`,
-        message: `Renovación de tubería y pavimentación en ${m.streets[0]} de 08:30 a 14:30. Acceso garantizado a residentes a pie y urgencias.`,
-        streets: [m.streets[0]],
+        title: `Corte temporal por mejoras en ${featuredAlertStreet}`,
+        message: `Renovación de tubería y pavimentación en ${featuredAlertStreet} de 08:30 a 14:30. Acceso garantizado a residentes a pie y urgencias.`,
+        streets: [featuredAlertStreet],
         start: '2026-11-20',
         end: '2026-11-27',
         severity: 'CRITICAL',
