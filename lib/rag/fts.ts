@@ -105,7 +105,7 @@ export async function generateGeminiEmbedding(
 ): Promise<number[] | null> {
   try {
     const res = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/text-embedding-004:embedContent?key=${encodeURIComponent(
+      `https://generativelanguage.googleapis.com/v1beta/models/gemini-embedding-001:embedContent?key=${encodeURIComponent(
         apiKey
       )}`,
       {
@@ -113,7 +113,7 @@ export async function generateGeminiEmbedding(
         headers: { 'Content-Type': 'application/json' },
         signal: AbortSignal.timeout(8000),
         body: JSON.stringify({
-          model: 'models/text-embedding-004',
+          model: 'models/gemini-embedding-001',
           content: { parts: [{ text: text.slice(0, 6000) }] },
           outputDimensionality: 768,
         }),

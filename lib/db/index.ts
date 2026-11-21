@@ -487,6 +487,14 @@ async function initSchema(db: DbClient): Promise<void> {
   `);
 
   await db.execute(`ALTER TABLE faq_cache ADD COLUMN IF NOT EXISTS approved_by_admin INTEGER NOT NULL DEFAULT 1;`);
+
+  // Migrar modelos Gemini retirados (404) a un modelo vigente y rápido
+  await db.execute(`
+    UPDATE ai_configs
+    SET primary_model = 'gemini-3.5-flash-lite'
+    WHERE primary_provider = 'GEMINI'
+      AND primary_model IN ('gemini-2.0-flash', 'models/gemini-2.0-flash', 'gemini-1.5-flash', 'gemini-1.5-pro');
+  `);
 }
 
 export async function getDb(): Promise<DbClient> {

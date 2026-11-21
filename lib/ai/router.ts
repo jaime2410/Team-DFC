@@ -67,7 +67,24 @@ const DEFAULT_BASE_URLS: Record<Exclude<AIProvider, 'LOCAL'>, string> = {
   OPENROUTER: 'https://openrouter.ai/api/v1',
 };
 
-const REQUEST_TIMEOUT_MS = 10000;
+const DEFAULT_GEMINI_MODEL = 'gemini-3.5-flash-lite';
+const DEPRECATED_GEMINI_MODELS = new Set([
+  'gemini-2.0-flash',
+  'gemini-2.0-flash-exp',
+  'gemini-2.0-flash-001',
+  'gemini-1.5-flash',
+  'gemini-1.5-pro',
+]);
+
+function normalizeGeminiModel(model: string): string {
+  const clean = model.trim().replace(/^models\//i, '');
+  if (!clean || DEPRECATED_GEMINI_MODELS.has(clean.toLowerCase())) {
+    return DEFAULT_GEMINI_MODEL;
+  }
+  return clean;
+}
+
+const REQUEST_TIMEOUT_MS = 15000;
 
 function parseDataUrl(imageBase64: string): { mimeType: string; data: string; fullUrl: string } {
   const match = imageBase64.match(/^data:(image\/[a-zA-Z0-9.+-]+);base64,(.+)$/);
@@ -107,7 +124,8 @@ async function callGemini({
   temperature: number;
 }): Promise<string> {
   const cleanBase = (baseUrl || DEFAULT_BASE_URLS.GEMINI).replace(/\/$/, '');
-  const endpoint = `${cleanBase}/models/${encodeURIComponent(model)}:generateContent?key=${encodeURIComponent(apiKey)}`;
+  const cleanModel = normalizeGeminiModel(model);
+  const endpoint = `${cleanBase}/models/${encodeURIComponent(cleanModel)}:generateContent?key=${encodeURIComponent(apiKey)}`;
 
   type GeminiPart =
     | { text: string }
@@ -152,14 +170,20 @@ async function callGemini({
 
   const json = (await res.json()) as {
     candidates?: Array<{
-      content?: { parts?: Array<{ text?: string }> };
+      content?: { parts?: Array<{ text?: string; thought?: boolean }> };
     }>;
     usageMetadata?: {
       promptTokenCount?: number;
       candidatesTokenCount?: number;
     };
   };
-  const text = json.candidates?.[0]?.content?.parts?.[0]?.text?.trim();
+  const parts = json.candidates?.[0]?.content?.parts ?? [];
+  const visibleText = parts
+    .filter((p) => !p.thought && typeof p.text === 'string')
+    .map((p) => p.text ?? '')
+    .join('')
+    .trim();
+  const text = visibleText || parts.find((p) => typeof p.text === 'string')?.text?.trim();
   if (!text) {
     throw new Error('GEMINI returned empty response');
   }
@@ -669,15 +693,18 @@ export async function testProviderConnection({
   }
 
   const defaultModels: Record<Exclude<AIProvider, 'LOCAL'>, string> = {
-    GEMINI: 'gemini-2.0-flash',
+    GEMINI: DEFAULT_GEMINI_MODEL,
     GROQ: 'llama-3.3-70b-versatile',
     OPENAI: 'gpt-4o-mini',
     OPENROUTER: 'meta-llama/llama-3.1-8b-instruct:free',
   };
-  const chosenModel = model?.trim() || defaultModels[provider];
+  const chosenModel =
+    provider === 'GEMINI'
+      ? normalizeGeminiModel(model?.trim() || defaultModels.GEMINI)
+      : model?.trim() || defaultModels[provider];
 
   try {
-    const reply =
+    const rawReply =
       provider === 'GEMINI'
         ? await callGemini({
             apiKey: trimmedKey,
@@ -686,7 +713,7 @@ export async function testProviderConnection({
             systemPrompt: 'Reply with OK.',
             userPrompt: 'Say OK',
             history: [],
-            maxTokens: 10,
+            maxTokens: 64,
             temperature: 0,
           })
         : await callOpenAICompatible({
@@ -697,15 +724,17 @@ export async function testProviderConnection({
             systemPrompt: 'Reply with OK.',
             userPrompt: 'Say OK',
             history: [],
-            maxTokens: 10,
+            maxTokens: 64,
             temperature: 0,
           });
+
+    const unwrapped = unwrapLlmResult(rawReply, 16);
 
     return {
       ok: true,
       provider,
       model: chosenModel,
-      message: `Conexión correcta (${reply.slice(0, 30)}).`,
+      message: `Conexión correcta (${unwrapped.text.slice(0, 30)}) · ${chosenModel}.`,
       latencyMs: Date.now() - start,
     };
   } catch (err) {

@@ -529,12 +529,16 @@ export default function AdminPage() {
 
   async function handleTestProvider(p: ProviderConfigItem) {
     setTestResults((prev) => ({ ...prev, [p.provider]: 'Probando conexión...' }));
+    const configuredModel = aiConfigs.find(
+      (c) => c.primaryProvider === p.provider && c.primaryModel.trim()
+    )?.primaryModel;
     const res = await fetch('/api/admin/ai-config/test', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         provider: p.provider,
         apiKey: p.draftKey,
+        model: configuredModel,
         baseUrl: p.baseUrl,
       }),
     });
