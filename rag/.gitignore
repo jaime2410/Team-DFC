@@ -1,0 +1,10 @@
+# Nunca subir claves secretas a GitHub
+.env
+
+# Archivos temporales y caché de Python
+__pycache__/
+*.py[cod]
+*.tmp
+.venv/
+venv/
+.DS_Store
