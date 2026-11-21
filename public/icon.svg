@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512" role="img" aria-label="AlmeríaCerca">
+  <rect width="512" height="512" rx="116" fill="#E45735" />
+  <circle cx="256" cy="148" r="44" fill="#F2B84B" />
+  <path d="M256 76v20M256 200v20M184 148h20M308 148h20M205 97l14 14M293 185l14 14M307 97l-14 14M219 185l-14 14" stroke="#FFFDF8" stroke-width="14" stroke-linecap="round" />
+  <path d="M116 258L256 184L396 258V282H116V258Z" fill="#FFFDF8" />
+  <rect x="148" y="298" width="36" height="106" rx="12" fill="#FFFDF8" />
+  <rect x="238" y="298" width="36" height="106" rx="12" fill="#FFFDF8" />
+  <rect x="328" y="298" width="36" height="106" rx="12" fill="#FFFDF8" />
+  <rect x="108" y="416" width="296" height="28" rx="14" fill="#FFFDF8" />
+</svg>

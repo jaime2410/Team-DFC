@@ -1,4 +1,4 @@
-import type { Metadata } from 'next';
+import type { Metadata, Viewport } from 'next';
 import { Outfit, Plus_Jakarta_Sans } from 'next/font/google';
 import './globals.css';
 import { I18nProvider } from '@/lib/i18n/I18nProvider';
@@ -17,10 +17,19 @@ const plusJakarta = Plus_Jakarta_Sans({
   display: 'swap',
 });
 
+export const viewport: Viewport = {
+  themeColor: '#E45735',
+};
+
 export const metadata: Metadata = {
   title: 'AlmeríaCerca — Tu Ayuntamiento, a un mensaje',
   description:
     'Plataforma ciudadana multi-municipio, accesible y multi-idioma para la provincia de Almería.',
+  appleWebApp: {
+    capable: true,
+    statusBarStyle: 'default',
+    title: 'AlmeríaCerca',
+  },
 };
 
 export default function RootLayout({
