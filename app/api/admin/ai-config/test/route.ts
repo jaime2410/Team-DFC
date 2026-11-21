@@ -40,11 +40,14 @@ export async function POST(request: NextRequest) {
       baseUrl,
     });
 
-    return NextResponse.json(result);
+    return NextResponse.json({
+      ...result,
+      models: result.models ?? [],
+    });
   } catch (error) {
     console.error('Error in POST /api/admin/ai-config/test:', error);
     return NextResponse.json(
-      { ok: false, message: 'No se pudo probar la conexión.' },
+      { ok: false, models: [], message: 'No se pudo probar la conexión.' },
       { status: 500 }
     );
   }

@@ -486,7 +486,7 @@ La basura orgánica debe depositarse entre las 20:00 y las 23:00 horas en los co
       {
         feature: 'CHAT',
         primaryProvider: 'GEMINI',
-        primaryModel: 'gemini-3.5-flash-lite',
+        primaryModel: 'gemini-2.5-flash',
         backups: [
           { provider: 'GROQ', model: 'llama-3.3-70b-versatile' },
           { provider: 'LOCAL', model: 'deterministic-v1' },
@@ -497,7 +497,7 @@ La basura orgánica debe depositarse entre las 20:00 y las 23:00 horas en los co
       {
         feature: 'CLASSIFY',
         primaryProvider: 'GEMINI',
-        primaryModel: 'gemini-3.5-flash-lite',
+        primaryModel: 'gemini-2.5-flash',
         backups: [
           { provider: 'GROQ', model: 'llama-3.3-70b-versatile' },
           { provider: 'LOCAL', model: 'deterministic-v1' },
@@ -508,7 +508,7 @@ La basura orgánica debe depositarse entre las 20:00 y las 23:00 horas en los co
       {
         feature: 'VISION',
         primaryProvider: 'GEMINI',
-        primaryModel: 'gemini-3.5-flash-lite',
+        primaryModel: 'gemini-2.5-flash',
         backups: [
           { provider: 'OPENAI', model: 'gpt-4o-mini' },
           { provider: 'LOCAL', model: 'deterministic-v1' },

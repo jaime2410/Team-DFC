@@ -67,21 +67,247 @@ const DEFAULT_BASE_URLS: Record<Exclude<AIProvider, 'LOCAL'>, string> = {
   OPENROUTER: 'https://openrouter.ai/api/v1',
 };
 
-const DEFAULT_GEMINI_MODEL = 'gemini-3.5-flash-lite';
-const DEPRECATED_GEMINI_MODELS = new Set([
-  'gemini-2.0-flash',
-  'gemini-2.0-flash-exp',
-  'gemini-2.0-flash-001',
-  'gemini-1.5-flash',
-  'gemini-1.5-pro',
-]);
+const DEFAULT_GEMINI_MODEL = 'gemini-2.5-flash';
+
+const FALLBACK_MODELS: Record<AIProvider, string[]> = {
+  GEMINI: [
+    'gemini-2.5-flash',
+    'gemini-2.5-flash-lite',
+    'gemini-2.0-flash',
+    'gemini-2.5-pro',
+  ],
+  GROQ: [
+    'llama-3.3-70b-versatile',
+    'llama-3.1-8b-instant',
+    'meta-llama/llama-4-scout-17b-16e-instruct',
+  ],
+  OPENAI: ['gpt-4o-mini', 'gpt-4o', 'gpt-4.1-mini'],
+  OPENROUTER: [
+    'meta-llama/llama-3.3-70b-instruct:free',
+    'google/gemini-2.0-flash-exp:free',
+    'qwen/qwen-2.5-vl-7b-instruct:free',
+  ],
+  LOCAL: ['deterministic-v1'],
+};
+
+const MODEL_CACHE_TTL_MS = 600_000;
+const modelListCache = new Map<string, { models: string[]; expiresAt: number }>();
 
 function normalizeGeminiModel(model: string): string {
   const clean = model.trim().replace(/^models\//i, '');
-  if (!clean || DEPRECATED_GEMINI_MODELS.has(clean.toLowerCase())) {
+  if (!clean || clean.toLowerCase() === 'gemini-3.5-flash-lite') {
     return DEFAULT_GEMINI_MODEL;
   }
   return clean;
+}
+
+export async function listProviderModels({
+  provider,
+  apiKey,
+  baseUrl,
+}: {
+  provider: AIProvider;
+  apiKey?: string;
+  baseUrl?: string;
+}): Promise<string[]> {
+  if (provider === 'LOCAL') {
+    return ['deterministic-v1'];
+  }
+
+  const trimmedKey = (apiKey ?? '').trim();
+  if (!trimmedKey) {
+    return [...FALLBACK_MODELS[provider]];
+  }
+
+  const cleanBase = (baseUrl || DEFAULT_BASE_URLS[provider]).replace(/\/$/, '');
+  const cacheKey = `${provider}:${cleanBase}:${trimmedKey.slice(-6)}`;
+  const cached = modelListCache.get(cacheKey);
+  if (cached && cached.expiresAt > Date.now()) {
+    return [...cached.models];
+  }
+
+  try {
+    let discovered: string[] = [];
+
+    if (provider === 'GEMINI') {
+      const res = await fetch(
+        `${cleanBase}/models?key=${encodeURIComponent(trimmedKey)}`,
+        {
+          method: 'GET',
+          signal: AbortSignal.timeout(10000),
+        }
+      );
+      if (!res.ok) {
+        return [...FALLBACK_MODELS.GEMINI];
+      }
+      const data = (await res.json()) as {
+        models?: Array<{
+          name?: string;
+          supportedGenerationMethods?: string[];
+        }>;
+      };
+      const rawModels = Array.isArray(data.models) ? data.models : [];
+      discovered = rawModels
+        .filter(
+          (m) =>
+            Array.isArray(m.supportedGenerationMethods) &&
+            m.supportedGenerationMethods.includes('generateContent')
+        )
+        .map((m) => (m.name ?? '').replace(/^models\//i, '').trim())
+        .filter(
+          (id) =>
+            /^gemini-/i.test(id) &&
+            !/(embedding|imagen|veo|tts|aqa|bison)/i.test(id)
+        );
+    } else {
+      const headers: Record<string, string> = {
+        Authorization: `Bearer ${trimmedKey}`,
+      };
+      if (provider === 'OPENROUTER') {
+        headers['HTTP-Referer'] = 'https://almeriacerca.local';
+        headers['X-Title'] = 'AlmeriaCerca';
+      }
+      const res = await fetch(`${cleanBase}/models`, {
+        method: 'GET',
+        headers,
+        signal: AbortSignal.timeout(10000),
+      });
+      if (!res.ok) {
+        return [...FALLBACK_MODELS[provider]];
+      }
+      const data = (await res.json()) as {
+        data?: Array<{ id?: string }>;
+      };
+      const rawList = Array.isArray(data.data) ? data.data : [];
+      discovered = rawList
+        .map((item) => (item.id ?? '').trim())
+        .filter(
+          (id) =>
+            Boolean(id) &&
+            !/(whisper|tts|embedding|dall-e|moderation|guard|audio|realtime)/i.test(
+              id
+            )
+        );
+
+      if (provider === 'OPENROUTER') {
+        discovered.sort((a, b) => {
+          const aFree = a.toLowerCase().endsWith(':free') ? 0 : 1;
+          const bFree = b.toLowerCase().endsWith(':free') ? 0 : 1;
+          return aFree - bFree;
+        });
+      }
+    }
+
+    const unique = Array.from(new Set(discovered));
+    if (unique.length === 0) {
+      return [...FALLBACK_MODELS[provider]];
+    }
+
+    modelListCache.set(cacheKey, {
+      models: unique,
+      expiresAt: Date.now() + MODEL_CACHE_TTL_MS,
+    });
+    return [...unique];
+  } catch {
+    return [...FALLBACK_MODELS[provider]];
+  }
+}
+
+export function resolveAutoModel({
+  provider,
+  featureKey,
+  availableModels,
+}: {
+  provider: AIProvider;
+  featureKey: AIFeatureKey;
+  availableModels?: string[];
+}): string {
+  if (provider === 'LOCAL') {
+    return 'deterministic-v1';
+  }
+
+  const list =
+    availableModels && availableModels.length > 0
+      ? availableModels
+      : FALLBACK_MODELS[provider];
+
+  const findMatch = (predicate: (lower: string) => boolean): string | undefined =>
+    list.find((m) => predicate(m.toLowerCase()));
+
+  if (provider === 'GEMINI') {
+    if (featureKey === 'CLASSIFY') {
+      return (
+        findMatch((l) => l.includes('2.5-flash-lite')) ??
+        findMatch((l) => l.includes('2.5-flash') && !l.includes('lite')) ??
+        findMatch((l) => l.includes('2.5-flash')) ??
+        findMatch((l) => l.includes('2.0-flash')) ??
+        findMatch((l) => l.includes('flash')) ??
+        list[0]
+      );
+    }
+    return (
+      findMatch((l) => l.includes('2.5-flash') && !l.includes('lite')) ??
+      findMatch((l) => l.includes('2.0-flash')) ??
+      findMatch((l) => l.includes('2.5-flash-lite')) ??
+      findMatch((l) => l.includes('flash')) ??
+      list[0]
+    );
+  }
+
+  if (provider === 'GROQ') {
+    if (featureKey === 'CLASSIFY') {
+      return (
+        findMatch((l) => l.includes('8b-instant')) ??
+        findMatch((l) => l.includes('llama-3.3-70b')) ??
+        list[0]
+      );
+    }
+    if (featureKey === 'CHAT') {
+      return (
+        findMatch((l) => l.includes('llama-3.3-70b')) ??
+        findMatch((l) => l.includes('70b')) ??
+        findMatch((l) => l.includes('8b-instant')) ??
+        list[0]
+      );
+    }
+    return (
+      findMatch((l) => l.includes('llama-4-scout')) ??
+      findMatch((l) => l.includes('vision')) ??
+      findMatch((l) => l.includes('llama-3.3-70b')) ??
+      list[0]
+    );
+  }
+
+  if (provider === 'OPENAI') {
+    return (
+      findMatch((l) => l.includes('gpt-4.1-mini')) ??
+      findMatch((l) => l.includes('gpt-4o-mini')) ??
+      findMatch((l) => l.includes('gpt-4o')) ??
+      list[0]
+    );
+  }
+
+  if (provider === 'OPENROUTER') {
+    if (featureKey === 'VISION') {
+      return (
+        findMatch(
+          (l) =>
+            l.includes(':free') &&
+            (l.includes('vl') || l.includes('vision') || l.includes('gemini'))
+        ) ??
+        findMatch((l) => l.includes(':free')) ??
+        list[0]
+      );
+    }
+    return (
+      findMatch((l) => l.includes('llama-3.3-70b') && l.includes(':free')) ??
+      findMatch((l) => l.includes('gemini') && l.includes(':free')) ??
+      findMatch((l) => l.includes(':free')) ??
+      list[0]
+    );
+  }
+
+  return list[0];
 }
 
 const REQUEST_TIMEOUT_MS = 15000;
@@ -562,43 +788,78 @@ export async function runAITask(input: RunAITaskInput): Promise<RunAITaskResult>
     }
 
     const providerCreds = keyMap.get(candidate.provider);
+    const rawCandidateModel = (candidate.model ?? '').trim();
+    const isAutoCandidate =
+      !rawCandidateModel || rawCandidateModel.toLowerCase() === 'auto';
+
     if (!providerCreds || providerCreds.enabled !== 1 || !providerCreds.api_key.trim()) {
+      const skippedModel = isAutoCandidate
+        ? resolveAutoModel({
+            provider: candidate.provider,
+            featureKey: input.featureKey,
+          })
+        : candidate.provider === 'GEMINI'
+        ? normalizeGeminiModel(rawCandidateModel)
+        : rawCandidateModel;
+
       attempts.push({
         provider: candidate.provider,
-        model: candidate.model,
+        model: skippedModel,
         ok: false,
         reason: 'disabled_or_missing_key',
       });
       continue;
     }
 
-    try {
-      const rawReply =
+    const trimmedApiKey = providerCreds.api_key.trim();
+    let activeModel: string;
+    if (isAutoCandidate) {
+      const discoveredModels = await listProviderModels({
+        provider: candidate.provider,
+        apiKey: trimmedApiKey,
+        baseUrl: providerCreds.base_url,
+      });
+      activeModel = resolveAutoModel({
+        provider: candidate.provider,
+        featureKey: input.featureKey,
+        availableModels: discoveredModels,
+      });
+    } else {
+      activeModel =
         candidate.provider === 'GEMINI'
-          ? await callGemini({
-              apiKey: providerCreds.api_key.trim(),
-              baseUrl: providerCreds.base_url,
-              model: candidate.model,
-              systemPrompt: input.systemPrompt,
-              userPrompt: input.userPrompt,
-              history: trimmedHistory,
-              imageBase64: input.imageBase64,
-              maxTokens,
-              temperature,
-            })
-          : await callOpenAICompatible({
-              provider: candidate.provider,
-              apiKey: providerCreds.api_key.trim(),
-              baseUrl: providerCreds.base_url,
-              model: candidate.model,
-              systemPrompt: input.systemPrompt,
-              userPrompt: input.userPrompt,
-              history: trimmedHistory,
-              imageBase64: input.imageBase64,
-              maxTokens,
-              temperature,
-            });
+          ? normalizeGeminiModel(rawCandidateModel)
+          : rawCandidateModel;
+    }
 
+    const activeProvider = candidate.provider;
+    const invokeCandidate = async (modelToRun: string): Promise<string> =>
+      activeProvider === 'GEMINI'
+        ? callGemini({
+            apiKey: trimmedApiKey,
+            baseUrl: providerCreds.base_url,
+            model: modelToRun,
+            systemPrompt: input.systemPrompt,
+            userPrompt: input.userPrompt,
+            history: trimmedHistory,
+            imageBase64: input.imageBase64,
+            maxTokens,
+            temperature,
+          })
+        : callOpenAICompatible({
+            provider: activeProvider,
+            apiKey: trimmedApiKey,
+            baseUrl: providerCreds.base_url,
+            model: modelToRun,
+            systemPrompt: input.systemPrompt,
+            userPrompt: input.userPrompt,
+            history: trimmedHistory,
+            imageBase64: input.imageBase64,
+            maxTokens,
+            temperature,
+          });
+
+    try {
+      const rawReply = await invokeCandidate(activeModel);
       const unwrapped = unwrapLlmResult(
         rawReply,
         input.systemPrompt.length + input.userPrompt.length
@@ -606,26 +867,85 @@ export async function runAITask(input: RunAITaskInput): Promise<RunAITaskResult>
 
       attempts.push({
         provider: candidate.provider,
-        model: candidate.model,
+        model: activeModel,
         ok: true,
       });
 
       return {
         text: unwrapped.text,
         providerUsed: candidate.provider,
-        modelUsed: candidate.model,
+        modelUsed: activeModel,
         fallbackTriggered: i > 0,
         attempts,
         inputTokens: unwrapped.inputTokens,
         outputTokens: unwrapped.outputTokens,
       };
     } catch (err) {
+      const errMsg = err instanceof Error ? err.message : 'provider_error';
       attempts.push({
         provider: candidate.provider,
-        model: candidate.model,
+        model: activeModel,
         ok: false,
-        reason: err instanceof Error ? err.message : 'provider_error',
+        reason: errMsg,
       });
+
+      // Auto-recuperación ante HTTP 404 / modelo retirado
+      if (/(404|not found|model_not_found|decommissioned)/i.test(errMsg)) {
+        const availableModels = (
+          await listProviderModels({
+            provider: candidate.provider,
+            apiKey: trimmedApiKey,
+            baseUrl: providerCreds.base_url,
+          })
+        ).filter((m) => m.toLowerCase() !== activeModel.toLowerCase());
+
+        if (availableModels.length > 0) {
+          const recoveryModel = resolveAutoModel({
+            provider: candidate.provider,
+            featureKey: input.featureKey,
+            availableModels,
+          });
+
+          if (
+            recoveryModel &&
+            recoveryModel.toLowerCase() !== activeModel.toLowerCase()
+          ) {
+            try {
+              const retryReply = await invokeCandidate(recoveryModel);
+              const unwrappedRetry = unwrapLlmResult(
+                retryReply,
+                input.systemPrompt.length + input.userPrompt.length
+              );
+
+              attempts.push({
+                provider: candidate.provider,
+                model: recoveryModel,
+                ok: true,
+              });
+
+              return {
+                text: unwrappedRetry.text,
+                providerUsed: candidate.provider,
+                modelUsed: recoveryModel,
+                fallbackTriggered: i > 0,
+                attempts,
+                inputTokens: unwrappedRetry.inputTokens,
+                outputTokens: unwrappedRetry.outputTokens,
+              };
+            } catch (retryErr) {
+              attempts.push({
+                provider: candidate.provider,
+                model: recoveryModel,
+                ok: false,
+                reason:
+                  retryErr instanceof Error
+                    ? retryErr.message
+                    : 'provider_error',
+              });
+            }
+          }
+        }
+      }
     }
   }
 
@@ -666,6 +986,7 @@ export async function testProviderConnection({
   ok: boolean;
   provider: AIProvider;
   model: string;
+  models: string[];
   message: string;
   latencyMs: number;
 }> {
@@ -676,6 +997,7 @@ export async function testProviderConnection({
       ok: true,
       provider: 'LOCAL',
       model: model || 'deterministic-v1',
+      models: ['deterministic-v1'],
       message: 'Motor local determinista operativo (sin consumo de tokens externos).',
       latencyMs: Date.now() - start,
     };
@@ -687,54 +1009,68 @@ export async function testProviderConnection({
       ok: false,
       provider,
       model: model || '',
+      models: [...FALLBACK_MODELS[provider]],
       message: `Falta la API Key para ${provider}.`,
       latencyMs: Date.now() - start,
     };
   }
 
-  const defaultModels: Record<Exclude<AIProvider, 'LOCAL'>, string> = {
-    GEMINI: DEFAULT_GEMINI_MODEL,
-    GROQ: 'llama-3.3-70b-versatile',
-    OPENAI: 'gpt-4o-mini',
-    OPENROUTER: 'meta-llama/llama-3.1-8b-instruct:free',
-  };
+  const models = await listProviderModels({
+    provider,
+    apiKey: trimmedKey,
+    baseUrl,
+  });
+
+  const requestedModel = (model ?? '').trim();
+  const matchedInList = models.find(
+    (m) => m.toLowerCase() === requestedModel.toLowerCase()
+  );
+
   const chosenModel =
-    provider === 'GEMINI'
-      ? normalizeGeminiModel(model?.trim() || defaultModels.GEMINI)
-      : model?.trim() || defaultModels[provider];
+    !requestedModel ||
+    requestedModel.toLowerCase() === 'auto' ||
+    !matchedInList
+      ? resolveAutoModel({
+          provider,
+          featureKey: 'CHAT',
+          availableModels: models,
+        })
+      : provider === 'GEMINI'
+      ? normalizeGeminiModel(matchedInList)
+      : matchedInList;
 
   try {
-    const rawReply =
-      provider === 'GEMINI'
-        ? await callGemini({
-            apiKey: trimmedKey,
-            baseUrl: baseUrl || DEFAULT_BASE_URLS.GEMINI,
-            model: chosenModel,
-            systemPrompt: 'Reply with OK.',
-            userPrompt: 'Say OK',
-            history: [],
-            maxTokens: 64,
-            temperature: 0,
-          })
-        : await callOpenAICompatible({
-            provider,
-            apiKey: trimmedKey,
-            baseUrl: baseUrl || DEFAULT_BASE_URLS[provider],
-            model: chosenModel,
-            systemPrompt: 'Reply with OK.',
-            userPrompt: 'Say OK',
-            history: [],
-            maxTokens: 64,
-            temperature: 0,
-          });
-
-    const unwrapped = unwrapLlmResult(rawReply, 16);
+    if (provider === 'GEMINI') {
+      await callGemini({
+        apiKey: trimmedKey,
+        baseUrl: baseUrl || DEFAULT_BASE_URLS.GEMINI,
+        model: chosenModel,
+        systemPrompt: 'Reply with OK.',
+        userPrompt: 'Say OK',
+        history: [],
+        maxTokens: 64,
+        temperature: 0,
+      });
+    } else {
+      await callOpenAICompatible({
+        provider,
+        apiKey: trimmedKey,
+        baseUrl: baseUrl || DEFAULT_BASE_URLS[provider],
+        model: chosenModel,
+        systemPrompt: 'Reply with OK.',
+        userPrompt: 'Say OK',
+        history: [],
+        maxTokens: 64,
+        temperature: 0,
+      });
+    }
 
     return {
       ok: true,
       provider,
       model: chosenModel,
-      message: `Conexión correcta (${unwrapped.text.slice(0, 30)}) · ${chosenModel}.`,
+      models,
+      message: `Conexión correcta · Usando ${chosenModel} (${models.length} modelos activos)`,
       latencyMs: Date.now() - start,
     };
   } catch (err) {
@@ -742,6 +1078,7 @@ export async function testProviderConnection({
       ok: false,
       provider,
       model: chosenModel,
+      models,
       message: err instanceof Error ? err.message : 'Error de conexión.',
       latencyMs: Date.now() - start,
     };

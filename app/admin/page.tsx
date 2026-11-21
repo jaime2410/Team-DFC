@@ -65,6 +65,112 @@ const DEPT_OPTIONS = [
   'Fiestas',
 ] as const;
 const PROVIDER_OPTIONS: AIProvider[] = ['GEMINI', 'GROQ', 'OPENAI', 'OPENROUTER', 'LOCAL'];
+const DEFAULT_PROVIDER_MODELS: Record<AIProvider, string[]> = {
+  GEMINI: [
+    'gemini-2.5-flash',
+    'gemini-2.5-flash-lite',
+    'gemini-2.0-flash',
+    'gemini-2.5-pro',
+  ],
+  GROQ: [
+    'llama-3.3-70b-versatile',
+    'llama-3.1-8b-instant',
+    'meta-llama/llama-4-scout-17b-16e-instruct',
+  ],
+  OPENAI: ['gpt-4o-mini', 'gpt-4o', 'gpt-4.1-mini'],
+  OPENROUTER: [
+    'meta-llama/llama-3.3-70b-instruct:free',
+    'google/gemini-2.0-flash-exp:free',
+    'qwen/qwen-2.5-vl-7b-instruct:free',
+  ],
+  LOCAL: ['deterministic-v1'],
+};
+
+function previewAutoModel(
+  provider: AIProvider,
+  featureKey: AIFeatureKey,
+  list: string[]
+): string {
+  if (provider === 'LOCAL') return 'deterministic-v1';
+  const models = list && list.length > 0 ? list : DEFAULT_PROVIDER_MODELS[provider];
+  const findMatch = (pred: (lower: string) => boolean) =>
+    models.find((m) => pred(m.toLowerCase()));
+
+  if (provider === 'GEMINI') {
+    if (featureKey === 'CLASSIFY') {
+      return (
+        findMatch((l) => l.includes('2.5-flash-lite')) ??
+        findMatch((l) => l.includes('2.5-flash') && !l.includes('lite')) ??
+        findMatch((l) => l.includes('2.5-flash')) ??
+        findMatch((l) => l.includes('2.0-flash')) ??
+        findMatch((l) => l.includes('flash')) ??
+        models[0]
+      );
+    }
+    return (
+      findMatch((l) => l.includes('2.5-flash') && !l.includes('lite')) ??
+      findMatch((l) => l.includes('2.0-flash')) ??
+      findMatch((l) => l.includes('2.5-flash-lite')) ??
+      findMatch((l) => l.includes('flash')) ??
+      models[0]
+    );
+  }
+
+  if (provider === 'GROQ') {
+    if (featureKey === 'CLASSIFY') {
+      return (
+        findMatch((l) => l.includes('8b-instant')) ??
+        findMatch((l) => l.includes('llama-3.3-70b')) ??
+        models[0]
+      );
+    }
+    if (featureKey === 'CHAT') {
+      return (
+        findMatch((l) => l.includes('llama-3.3-70b')) ??
+        findMatch((l) => l.includes('70b')) ??
+        findMatch((l) => l.includes('8b-instant')) ??
+        models[0]
+      );
+    }
+    return (
+      findMatch((l) => l.includes('llama-4-scout')) ??
+      findMatch((l) => l.includes('vision')) ??
+      findMatch((l) => l.includes('llama-3.3-70b')) ??
+      models[0]
+    );
+  }
+
+  if (provider === 'OPENAI') {
+    return (
+      findMatch((l) => l.includes('gpt-4.1-mini')) ??
+      findMatch((l) => l.includes('gpt-4o-mini')) ??
+      findMatch((l) => l.includes('gpt-4o')) ??
+      models[0]
+    );
+  }
+
+  if (provider === 'OPENROUTER') {
+    if (featureKey === 'VISION') {
+      return (
+        findMatch(
+          (l) =>
+            l.includes(':free') &&
+            (l.includes('vl') || l.includes('vision') || l.includes('gemini'))
+        ) ??
+        findMatch((l) => l.includes(':free')) ??
+        models[0]
+      );
+    }
+    return (
+      findMatch((l) => l.includes('llama-3.3-70b') && l.includes(':free')) ??
+      findMatch((l) => l.includes('gemini') && l.includes(':free')) ??
+      findMatch((l) => l.includes(':free')) ??
+      models[0]
+    );
+  }
+
+  return models[0];
+}
 const CHART_COLORS = ['#E45735', '#1B8A7A', '#2C6E91', '#F2B84B', '#B84A62', '#1E242B'];
 
 interface AdminIncident {
@@ -262,6 +368,9 @@ export default function AdminPage() {
   // Pestaña 2: APIs de IA, Backups y FAQs Sugeridas
   const [providers, setProviders] = useState<ProviderConfigItem[]>([]);
   const [aiConfigs, setAiConfigs] = useState<FeatureConfigItem[]>([]);
+  const [providerModels, setProviderModels] = useState<Record<AIProvider, string[]>>(
+    DEFAULT_PROVIDER_MODELS
+  );
   const [tokenStats, setTokenStats] = useState({
     totalConsultations: 0,
     zeroTokenConsultations: 0,
@@ -529,24 +638,52 @@ export default function AdminPage() {
 
   async function handleTestProvider(p: ProviderConfigItem) {
     setTestResults((prev) => ({ ...prev, [p.provider]: 'Probando conexión...' }));
-    const configuredModel = aiConfigs.find(
-      (c) => c.primaryProvider === p.provider && c.primaryModel.trim()
-    )?.primaryModel;
     const res = await fetch('/api/admin/ai-config/test', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         provider: p.provider,
         apiKey: p.draftKey,
-        model: configuredModel,
+        model: 'auto',
         baseUrl: p.baseUrl,
       }),
     });
     const data = (await res.json()) as {
       ok?: boolean;
+      model?: string;
+      models?: string[];
       message?: string;
       latencyMs?: number;
     };
+    if (Array.isArray(data.models) && data.models.length > 0) {
+      const discovered = data.models;
+      setProviderModels((prev) => ({
+        ...prev,
+        [p.provider]: discovered,
+      }));
+      setAiConfigs((prev) =>
+        prev.map((cfg) => {
+          const nextPrimaryModel =
+            cfg.primaryProvider === p.provider &&
+            cfg.primaryModel !== 'auto' &&
+            !discovered.includes(cfg.primaryModel)
+              ? 'auto'
+              : cfg.primaryModel;
+          const nextBackups = cfg.backups.map((bk) =>
+            bk.provider === p.provider &&
+            bk.model !== 'auto' &&
+            !discovered.includes(bk.model)
+              ? { ...bk, model: 'auto' }
+              : bk
+          );
+          return {
+            ...cfg,
+            primaryModel: nextPrimaryModel,
+            backups: nextBackups,
+          };
+        })
+      );
+    }
     setTestResults((prev) => ({
       ...prev,
       [p.provider]: `${data.ok ? '✅' : '❌'} ${data.message ?? ''} (${
@@ -1400,10 +1537,13 @@ export default function AdminPage() {
                     <select
                       value={cfg.primaryProvider}
                       onChange={(e) => {
+                        const newProv = e.target.value as AIProvider;
                         const next = [...aiConfigs];
                         next[cIdx] = {
                           ...cfg,
-                          primaryProvider: e.target.value as AIProvider,
+                          primaryProvider: newProv,
+                          primaryModel:
+                            newProv === 'LOCAL' ? 'deterministic-v1' : 'auto',
                         };
                         setAiConfigs(next);
                       }}
@@ -1421,16 +1561,50 @@ export default function AdminPage() {
                     <label className="text-xs font-bold text-tinta/70">
                       Modelo Principal
                     </label>
-                    <input
-                      type="text"
+                    <select
                       value={cfg.primaryModel}
                       onChange={(e) => {
                         const next = [...aiConfigs];
                         next[cIdx] = { ...cfg, primaryModel: e.target.value };
                         setAiConfigs(next);
                       }}
-                      className="min-h-[42px] rounded-xl bg-tarjeta border border-superficie px-3 text-sm"
-                    />
+                      className="min-h-[42px] rounded-xl bg-tarjeta border border-superficie px-3 text-sm font-semibold"
+                    >
+                      {cfg.primaryProvider !== 'LOCAL' && (
+                        <option value="auto">
+                          ✨ Automático (usando:{' '}
+                          {previewAutoModel(
+                            cfg.primaryProvider,
+                            cfg.featureKey,
+                            providerModels[cfg.primaryProvider]
+                          )}
+                          )
+                        </option>
+                      )}
+                      {cfg.primaryModel &&
+                        cfg.primaryModel !== 'auto' &&
+                        !providerModels[cfg.primaryProvider].includes(
+                          cfg.primaryModel
+                        ) && (
+                          <option value={cfg.primaryModel}>
+                            {cfg.primaryModel}
+                          </option>
+                        )}
+                      {providerModels[cfg.primaryProvider].map((mName) => (
+                        <option key={mName} value={mName}>
+                          {mName}
+                        </option>
+                      ))}
+                    </select>
+                    <span className="text-[11px] font-semibold text-verdeCabo">
+                      {cfg.primaryModel === 'auto'
+                        ? `Modelo activo para ${cfg.featureKey}: ${previewAutoModel(
+                            cfg.primaryProvider,
+                            cfg.featureKey,
+                            providerModels[cfg.primaryProvider]
+                          )}`
+                        : `Modelo fijado manualmente: ${cfg.primaryModel}`}
+                    </span>
                   </div>
 
                   <div className="flex flex-col gap-1.5">
@@ -1480,11 +1654,16 @@ export default function AdminPage() {
                         <select
                           value={bk.provider}
                           onChange={(e) => {
+                            const newProv = e.target.value as AIProvider;
                             const next = [...aiConfigs];
                             const bks = [...cfg.backups];
                             bks[bIdx] = {
                               ...bk,
-                              provider: e.target.value as AIProvider,
+                              provider: newProv,
+                              model:
+                                newProv === 'LOCAL'
+                                  ? 'deterministic-v1'
+                                  : 'auto',
                             };
                             next[cIdx] = { ...cfg, backups: bks };
                             setAiConfigs(next);
@@ -1497,8 +1676,7 @@ export default function AdminPage() {
                             </option>
                           ))}
                         </select>
-                        <input
-                          type="text"
+                        <select
                           value={bk.model}
                           onChange={(e) => {
                             const next = [...aiConfigs];
@@ -1507,8 +1685,30 @@ export default function AdminPage() {
                             next[cIdx] = { ...cfg, backups: bks };
                             setAiConfigs(next);
                           }}
-                          className="flex-1 min-w-0 rounded-lg bg-tarjeta border border-superficie px-2 py-1.5 text-xs"
-                        />
+                          className="flex-1 min-w-0 rounded-lg bg-tarjeta border border-superficie px-2 py-1.5 text-xs font-semibold"
+                        >
+                          {bk.provider !== 'LOCAL' && (
+                            <option value="auto">
+                              ✨ Auto (
+                              {previewAutoModel(
+                                bk.provider,
+                                cfg.featureKey,
+                                providerModels[bk.provider]
+                              )}
+                              )
+                            </option>
+                          )}
+                          {bk.model &&
+                            bk.model !== 'auto' &&
+                            !providerModels[bk.provider].includes(bk.model) && (
+                              <option value={bk.model}>{bk.model}</option>
+                            )}
+                          {providerModels[bk.provider].map((mName) => (
+                            <option key={mName} value={mName}>
+                              {mName}
+                            </option>
+                          ))}
+                        </select>
                         <button
                           type="button"
                           onClick={() => {
