@@ -9,6 +9,7 @@ import {
   ChevronDown,
   Contrast,
   Globe,
+  Home,
   MapPin,
   ShieldCheck,
   Sun,
@@ -123,8 +124,8 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     <div className="min-h-screen flex flex-col bg-arena text-tinta">
       <header className="sticky top-0 z-40 bg-tarjeta/95 backdrop-blur-md border-b border-superficie shadow-sm">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4 flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
-          {/* Identidad */}
-          <div className="flex items-center justify-between gap-4">
+          {/* Identidad + Botón explícito Menú */}
+          <div className="flex items-center justify-between gap-3">
             <Link
               href="/"
               className="flex items-center gap-3 group focus:outline-none focus-visible:ring-2 focus-visible:ring-terracota rounded-2xl p-1"
@@ -141,6 +142,17 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                 </p>
               </div>
             </Link>
+
+            {pathname !== '/' && (
+              <Link
+                href="/"
+                aria-label="Volver al menú principal"
+                className="inline-flex items-center gap-2 rounded-2xl px-4 py-2 min-h-[44px] text-sm font-heading font-bold bg-terracota text-tarjeta hover:opacity-95 transition-opacity shadow-sm shrink-0"
+              >
+                <Home className="w-4 h-4 shrink-0" aria-hidden="true" />
+                <span>Menú</span>
+              </Link>
+            )}
           </div>
 
           {/* Controles espaciados y accesibles */}
@@ -292,14 +304,17 @@ export function AppShell({ children }: { children: React.ReactNode }) {
               </Link>
             )}
 
-            {/* Enlace limpio Entrar / Mi Perfil */}
+            {/* Enlace claro "Mi perfil · [Nombre]" */}
             <Link
               href="/mi-perfil"
+              aria-label={
+                sessionUser ? `Mi perfil · ${sessionUser.name}` : t('nav.loginOrProfile')
+              }
               className="inline-flex items-center gap-2 rounded-2xl px-4 py-2 min-h-[44px] text-sm font-semibold bg-buganvilla text-tarjeta hover:opacity-95 transition-opacity shadow-sm"
             >
               <UserCircle2 className="w-4 h-4 shrink-0" aria-hidden="true" />
-              <span className="max-w-[160px] truncate">
-                {sessionUser ? sessionUser.name : t('nav.loginOrProfile')}
+              <span className="max-w-[230px] truncate">
+                {sessionUser ? `Mi perfil · ${sessionUser.name}` : t('nav.loginOrProfile')}
               </span>
             </Link>
           </nav>

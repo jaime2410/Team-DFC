@@ -1,5 +1,6 @@
 import bcrypt from 'bcryptjs';
 import type { DbClient } from './index';
+import { loadOfficialMunicipalDataset } from '@/lib/rag/scraper';
 
 interface MunicipalitySeed {
   id: string;
@@ -446,9 +447,9 @@ La basura orgánica debe depositarse entre las 20:00 y las 23:00 horas en los co
       const docId = `doc-${m.slug}-${idx + 1}`;
       const chunks = splitWordsIntoChunks(doc.content, 350, 40);
       await db.execute(
-        `INSERT INTO rag_documents (id, municipality_id, filename, doc_type, char_count, chunk_count, uploaded_by)
-         VALUES ($1, $2, $3, $4, $5, $6, $7)`,
-        [docId, m.id, doc.filename, doc.docType, doc.content.length, chunks.length, adminId]
+        `INSERT INTO rag_documents (id, municipality_id, filename, doc_type, category, char_count, chunk_count, uploaded_by)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+        [docId, m.id, doc.filename, doc.docType, 'guia_municipal', doc.content.length, chunks.length, adminId]
       );
       for (let cIdx = 0; cIdx < chunks.length; cIdx++) {
         const chunkId = `${docId}-c${cIdx + 1}`;
@@ -462,6 +463,51 @@ La basura orgánica debe depositarse entre las 20:00 y las 23:00 horas en los co
           `INSERT INTO rag_chunks_fts (chunk_id, document_id, municipality_id, filename, content)
            VALUES ($1, $2, $3, $4, $5)`,
           [chunkId, docId, m.id, doc.filename, chunkText]
+        );
+      }
+    }
+
+    // Sembrar el catálogo oficial de la Sede Electrónica (67 trámites SIA + páginas oficiales) y el Compendio de Leyes BOE
+    const officialScrapedDocs = loadOfficialMunicipalDataset(m.slug, m.name, m.province);
+    for (const sDoc of officialScrapedDocs) {
+      const safeSlug = sDoc.id.toLowerCase().replace(/[^a-z0-9_-]+/g, '-').slice(0, 64);
+      const sDocId = `doc-${m.slug}-${safeSlug}`;
+      const sDocType = sDoc.categoria.startsWith('ley_boe')
+        ? 'BOE'
+        : sDoc.categoria === 'tramite_sede'
+        ? 'SIA'
+        : 'SEDE';
+      const sChunks = splitWordsIntoChunks(sDoc.texto, 130, 20);
+      await db.execute(
+        `INSERT INTO rag_documents (id, municipality_id, filename, doc_type, category, source_url, status, char_count, chunk_count, uploaded_by)
+         VALUES ($1, $2, $3, $4, $5, $6, 'VIGENTE', $7, $8, $9)
+         ON CONFLICT (id) DO NOTHING`,
+        [
+          sDocId,
+          m.id,
+          sDoc.titulo,
+          sDocType,
+          sDoc.categoria,
+          sDoc.fuente_url,
+          sDoc.texto.length,
+          sChunks.length,
+          adminId,
+        ]
+      );
+      for (let cIdx = 0; cIdx < sChunks.length; cIdx++) {
+        const chunkId = `${sDocId}-c${cIdx + 1}`;
+        const chunkContent = `${sDoc.titulo}\n${sChunks[cIdx]}`;
+        await db.execute(
+          `INSERT INTO rag_chunks (chunk_id, document_id, municipality_id, filename, content)
+           VALUES ($1, $2, $3, $4, $5)
+           ON CONFLICT (chunk_id) DO NOTHING`,
+          [chunkId, sDocId, m.id, sDoc.titulo, chunkContent]
+        );
+        await db.execute(
+          `INSERT INTO rag_chunks_fts (chunk_id, document_id, municipality_id, filename, content)
+           VALUES ($1, $2, $3, $4, $5)
+           ON CONFLICT (chunk_id) DO NOTHING`,
+          [chunkId, sDocId, m.id, sDoc.titulo, chunkContent]
         );
       }
     }

@@ -56,7 +56,7 @@ const CATEGORY_DEPARTMENT: Record<IncidentCategory, IncidentDepartment> = {
 };
 
 const IMMEDIATE_DANGER_REGEX =
-  /(112|incendio|fuego|humo|derrumbe|cable|electro|explosi|herido|inundacion|accidente grave)/i;
+  /(\b112\b|incendio|fuego|humo|derrumbe|cable pelado|cable caido|electrocuc|electrocut|riesgo electrico|explosi|herido|inundacion|accidente grave)/i;
 
 const SYSTEM_PROMPT =
   'Eres un clasificador de incidencias urbanas de un ayuntamiento. ' +

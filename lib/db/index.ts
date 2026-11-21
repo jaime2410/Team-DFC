@@ -443,6 +443,20 @@ async function initSchema(db: DbClient): Promise<void> {
   await db.execute(`ALTER TABLE rag_documents ADD COLUMN IF NOT EXISTS status TEXT NOT NULL DEFAULT 'VIGENTE';`);
   await db.execute(`ALTER TABLE rag_documents ADD COLUMN IF NOT EXISTS valid_until TEXT;`);
   await db.execute(`ALTER TABLE rag_documents ADD COLUMN IF NOT EXISTS usage_count INTEGER NOT NULL DEFAULT 0;`);
+  await db.execute(`ALTER TABLE rag_documents ADD COLUMN IF NOT EXISTS category TEXT;`);
+
+  await db.execute(`ALTER TABLE rag_chunks ADD COLUMN IF NOT EXISTS embedding_model TEXT;`);
+  await db.execute(`ALTER TABLE rag_chunks_fts ADD COLUMN IF NOT EXISTS embedding_model TEXT;`);
+  await db.execute(`
+    UPDATE rag_chunks
+    SET embedding_model = 'gemini-embedding-001'
+    WHERE embedding IS NOT NULL AND embedding_model IS NULL;
+  `);
+  await db.execute(`
+    UPDATE rag_chunks_fts
+    SET embedding_model = 'gemini-embedding-001'
+    WHERE embedding IS NOT NULL AND embedding_model IS NULL;
+  `);
 
   await db.execute(`ALTER TABLE consultations ADD COLUMN IF NOT EXISTS escalated_to_human INTEGER NOT NULL DEFAULT 0;`);
   await db.execute(`ALTER TABLE consultations ADD COLUMN IF NOT EXISTS rag_doc_ids_json TEXT NOT NULL DEFAULT '[]';`);

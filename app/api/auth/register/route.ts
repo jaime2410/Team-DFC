@@ -8,6 +8,8 @@ import { syncNotificationsForCitizen } from '@/lib/personalization/matcher';
 
 export const dynamic = 'force-dynamic';
 
+const ADMIN_INVITE_CODE = 'AYTO-2026';
+
 export async function POST(request: NextRequest) {
   try {
     const body = (await request.json()) as {
@@ -16,11 +18,15 @@ export async function POST(request: NextRequest) {
       password?: string;
       municipalityId?: string;
       preferredLang?: string;
+      role?: 'CITIZEN' | 'ADMIN';
+      inviteCode?: string;
     };
 
     const name = (body.name ?? '').trim();
     const email = (body.email ?? '').trim().toLowerCase();
     const password = body.password ?? '';
+    const requestedRole: 'CITIZEN' | 'ADMIN' =
+      body.role === 'ADMIN' ? 'ADMIN' : 'CITIZEN';
 
     if (name.length < 2) {
       return NextResponse.json(
@@ -39,6 +45,19 @@ export async function POST(request: NextRequest) {
         { error: 'La contraseña debe tener al menos 4 caracteres.' },
         { status: 400 }
       );
+    }
+
+    if (requestedRole === 'ADMIN') {
+      const providedCode = (body.inviteCode ?? '').trim().toUpperCase();
+      if (providedCode !== ADMIN_INVITE_CODE) {
+        return NextResponse.json(
+          {
+            error:
+              'Código de invitación municipal inválido. Introduce el código oficial (AYTO-2026).',
+          },
+          { status: 403 }
+        );
+      }
     }
 
     const db = await getDb();
@@ -71,27 +90,39 @@ export async function POST(request: NextRequest) {
     await db.withTransaction(async (tx) => {
       await tx.execute(
         `INSERT INTO users (id, municipality_id, email, password_hash, name, role, department_name, preferred_lang)
-         VALUES ($1, $2, $3, $4, $5, 'CITIZEN', NULL, $6)`,
-        [userId, municipality.id, email, passwordHash, name, preferredLang]
+         VALUES ($1, $2, $3, $4, $5, $6, NULL, $7)`,
+        [
+          userId,
+          municipality.id,
+          email,
+          passwordHash,
+          name,
+          requestedRole,
+          preferredLang,
+        ]
       );
 
-      await tx.execute(
-        `INSERT INTO citizen_profiles (
-           user_id, municipality_id, street_name, neighborhood, household_size,
-           has_children, large_family, has_seniors_or_dependents, reduced_mobility,
-           income_bracket, interests_json, whatsapp_phone, notifications_opt_in
-         ) VALUES ($1, $2, $3, 'Centro', 1, 0, 0, 0, 0, 'MEDIUM', '[]', NULL, 1)`,
-        [userId, municipality.id, defaultStreet]
-      );
+      if (requestedRole === 'CITIZEN') {
+        await tx.execute(
+          `INSERT INTO citizen_profiles (
+             user_id, municipality_id, street_name, neighborhood, household_size,
+             has_children, large_family, has_seniors_or_dependents, reduced_mobility,
+             income_bracket, interests_json, whatsapp_phone, notifications_opt_in
+           ) VALUES ($1, $2, $3, 'Centro', 1, 0, 0, 0, 0, 'MEDIUM', '[]', NULL, 1)`,
+          [userId, municipality.id, defaultStreet]
+        );
+      }
     });
 
-    await syncNotificationsForCitizen(userId);
+    if (requestedRole === 'CITIZEN') {
+      await syncNotificationsForCitizen(userId);
+    }
 
     const sessionUser: SessionUser = {
       userId,
       email,
       name,
-      role: 'CITIZEN',
+      role: requestedRole,
       municipalityId: municipality.id,
       municipalitySlug: municipality.slug,
       municipalityName: municipality.name,

@@ -1,8 +1,15 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { requireAdminSession } from '@/lib/auth/session';
-import { extractTextFromFile, ingestDocument } from '@/lib/rag/fts';
+import {
+  extractTextFromFile,
+  ingestDocument,
+  ingestScrapedDocumentsBatch,
+  parseUploadedJsonDocuments,
+} from '@/lib/rag/fts';
+import { scrapeSingleOfficialUrl } from '@/lib/rag/scraper';
 
 export const dynamic = 'force-dynamic';
+export const maxDuration = 60;
 
 export async function POST(request: NextRequest) {
   const auth = await requireAdminSession();
@@ -19,13 +26,34 @@ export async function POST(request: NextRequest) {
 
       if (!file) {
         return NextResponse.json(
-          { error: 'Adjunta un archivo .pdf, .txt o .md.' },
+          { error: 'Adjunta un archivo .pdf, .txt, .md o .json.' },
           { status: 400 }
         );
       }
 
       const arrayBuffer = await file.arrayBuffer();
       const buffer = Buffer.from(arrayBuffer);
+      const lowerName = file.name.toLowerCase();
+
+      if (lowerName.endsWith('.json')) {
+        const jsonDocs = parseUploadedJsonDocuments(buffer, file.name);
+        if (jsonDocs.length > 1) {
+          const batchResult = await ingestScrapedDocumentsBatch({
+            municipalityId: auth.session.municipalityId,
+            documents: jsonDocs,
+            uploadedBy: auth.session.userId,
+            validUntil,
+          });
+          return NextResponse.json(
+            {
+              batch: batchResult,
+              message: `${batchResult.documentsIndexed} documentos JSON indexados (${batchResult.chunksIndexed} fragmentos).`,
+            },
+            { status: 201 }
+          );
+        }
+      }
+
       const text = await extractTextFromFile(buffer, file.name);
       const ext = file.name.split('.').pop()?.toUpperCase() || 'TXT';
 
@@ -43,50 +71,51 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ document: ingested }, { status: 201 });
     }
 
-    // Ingesta directa de texto o URL oficial
+    // Ingesta directa de texto o URL oficial con limpieza DOM
     const body = (await request.json()) as {
       title?: string;
       text?: string;
       sourceUrl?: string;
+      category?: string;
       validUntil?: string;
     };
 
-    const title = (body.title ?? '').trim() || 'Normativa_Oficial.txt';
+    let title = (body.title ?? '').trim();
     const sourceUrl = (body.sourceUrl ?? '').trim() || null;
     const validUntil = (body.validUntil ?? '').trim() || null;
+    const category = (body.category ?? '').trim() || (sourceUrl ? 'sede_electronica' : 'normativa_municipal');
     let text = (body.text ?? '').trim();
 
     if (!text && sourceUrl) {
-      try {
-        const res = await fetch(sourceUrl, { signal: AbortSignal.timeout(8000) });
-        if (res.ok) {
-          const html = await res.text();
-          text = html
-            .replace(/<script[\s\S]*?<\/script>/gi, ' ')
-            .replace(/<style[\s\S]*?<\/style>/gi, ' ')
-            .replace(/<[^>]+>/g, ' ')
-            .replace(/\s+/g, ' ')
-            .trim();
-        }
-      } catch {
-        // Fallback if remote URL is unreachable
+      const scraped = await scrapeSingleOfficialUrl(
+        sourceUrl,
+        title || 'Fuente_Oficial_Municipal'
+      );
+      text = scraped.text;
+      if (!title && scraped.title) {
+        title = scraped.title;
       }
+    }
+
+    if (!title) {
+      title = 'Normativa_Oficial.txt';
     }
 
     if (!text || text.length < 10) {
       return NextResponse.json(
-        { error: 'Introduce el contenido del documento o una URL accesible.' },
+        { error: 'Introduce el contenido del documento o una URL oficial accesible.' },
         { status: 400 }
       );
     }
 
-    const filename = /\.(pdf|txt|md)$/i.test(title) ? title : `${title}.txt`;
+    const filename = /\.(pdf|txt|md|json)$/i.test(title) ? title : title;
     const docType = sourceUrl ? 'URL' : 'TXT';
 
     const ingested = await ingestDocument({
       municipalityId: auth.session.municipalityId,
       filename,
       docType,
+      category,
       text,
       uploadedBy: auth.session.userId,
       sourceUrl,

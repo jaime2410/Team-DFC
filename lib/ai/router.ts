@@ -375,6 +375,15 @@ async function callGemini({
   }
   contents.push({ role: 'user', parts: currentParts });
 
+  const supportsThinkingConfig = /^gemini-2\.5-flash/i.test(cleanModel);
+  const generationConfig: Record<string, unknown> = {
+    maxOutputTokens: Math.max(maxTokens, 600),
+    temperature,
+  };
+  if (supportsThinkingConfig) {
+    generationConfig.thinkingConfig = { thinkingBudget: 0 };
+  }
+
   const res = await fetch(endpoint, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -382,10 +391,7 @@ async function callGemini({
     body: JSON.stringify({
       systemInstruction: { parts: [{ text: systemPrompt }] },
       contents,
-      generationConfig: {
-        maxOutputTokens: maxTokens,
-        temperature,
-      },
+      generationConfig,
     }),
   });
 
@@ -550,7 +556,7 @@ export function classifyLocally(userPrompt: string, hasImage: boolean): string {
     .replace(/[\u0300-\u036f]/g, '');
 
   const immediateDanger =
-    /(112|incendio|fuego|humo|derrumbe|cable|electro|explosi|herido|inundacion|accidente grave)/.test(
+    /(\b112\b|incendio|fuego|humo|derrumbe|cable pelado|cable caido|electrocuc|electrocut|riesgo electrico|explosi|herido|inundacion|accidente grave)/.test(
       norm
     );
 
@@ -669,7 +675,17 @@ async function synthesizeLocalChat({
       .map((item) => item.sentence)
       .join(' ');
 
-    const bodyText = excerpt || bestChunk.content.slice(0, 420);
+    const siaMatch = bestChunk.content.match(/C[oó]digo\s+SIA:\s*(\d+)/i);
+    const lawMatch = bestChunk.content.match(
+      /(Ley\s+(?:Org[aá]nica\s+)?\d+\/\d{4}[^.\n]*|Real\s+Decreto(?:\s+Legislativo)?\s+\d+\/\d{4}[^.\n]*)/i
+    );
+    const metaBadges: string[] = [];
+    if (siaMatch?.[1]) metaBadges.push(`Código SIA: ${siaMatch[1]}`);
+    if (lawMatch?.[1]) metaBadges.push(`Normativa: ${lawMatch[1].trim()}`);
+    if (bestChunk.sourceUrl) metaBadges.push(`Fuente oficial: ${bestChunk.sourceUrl}`);
+    const metaSuffix = metaBadges.length > 0 ? ` (${metaBadges.join(' · ')})` : '';
+
+    const bodyText = (excerpt || bestChunk.content.slice(0, 420)) + metaSuffix;
 
     if (lang === 'en') {
       return `According to ${municipalityName} official information (${bestChunk.filename}): ${bodyText}`;

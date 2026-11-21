@@ -40,6 +40,18 @@ interface ResolvedIncidentRow {
   updated_at: string;
 }
 
+interface PublicMapIncidentRow {
+  id: string;
+  tracking_code: string;
+  title: string;
+  category: string;
+  status: string;
+  lat: number;
+  lng: number;
+  address_label: string | null;
+  upvotes: number;
+}
+
 export async function GET(request: NextRequest) {
   try {
     const municipalityParam = request.nextUrl.searchParams.get('municipalityId');
@@ -135,10 +147,34 @@ export async function GET(request: NextRequest) {
       `SELECT tracking_code
        FROM incidents
        WHERE municipality_id = $1
+         AND COALESCE(is_quarantined, 0) = 0
        ORDER BY tracking_code ASC
        LIMIT 3`,
       [municipality.id]
     );
+
+    // Mapa público anonimizado: excluye cuarentena/spam, notas internas y datos personales
+    const mapRows = await db.query<PublicMapIncidentRow>(
+      `SELECT id, tracking_code, title, category, status, lat, lng, address_label, upvotes
+       FROM incidents
+       WHERE municipality_id = $1
+         AND COALESCE(is_quarantined, 0) = 0
+       ORDER BY created_at DESC
+       LIMIT 60`,
+      [municipality.id]
+    );
+
+    const publicMapIncidents = mapRows.map((row) => ({
+      id: row.id,
+      trackingCode: row.tracking_code,
+      title: row.title,
+      category: row.category,
+      status: row.status,
+      lat: Number(row.lat),
+      lng: Number(row.lng),
+      addressLabel: row.address_label,
+      upvotes: Number(row.upvotes ?? 1),
+    }));
 
     const mainSquare = municipality.streets[1] || municipality.streets[0] || 'Ayuntamiento';
 
@@ -172,10 +208,13 @@ export async function GET(request: NextRequest) {
         slug: municipality.slug,
         name: municipality.name,
         province: municipality.province,
+        centerLat: municipality.center_lat,
+        centerLng: municipality.center_lng,
       },
       streetAlerts,
       municipalAids,
       resolvedIncidents,
+      publicMapIncidents,
       infoCards,
       sampleCodes: sampleRows.map((r) => r.tracking_code),
     });

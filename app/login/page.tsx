@@ -8,6 +8,7 @@ import {
   Loader2,
   LogIn,
   MapPin,
+  ShieldCheck,
   Sparkles,
   UserCheck,
   UserPlus,
@@ -17,7 +18,7 @@ import { useTranslation } from '@/lib/i18n/I18nProvider';
 import { useMunicipality } from '@/lib/municipality/MunicipalityProvider';
 
 type MainTab = 'CITIZEN' | 'ADMIN';
-type CitizenMode = 'LOGIN' | 'REGISTER';
+type AuthMode = 'LOGIN' | 'REGISTER';
 
 interface LoginResponse {
   user?: {
@@ -38,11 +39,13 @@ function LoginContent() {
   const searchParams = useSearchParams();
 
   const [tab, setTab] = useState<MainTab>('CITIZEN');
-  const [citizenMode, setCitizenMode] = useState<CitizenMode>('LOGIN');
+  const [citizenMode, setCitizenMode] = useState<AuthMode>('LOGIN');
+  const [adminMode, setAdminMode] = useState<AuthMode>('LOGIN');
 
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [adminInviteCode, setAdminInviteCode] = useState('');
   const [adminMunicipality, setAdminMunicipality] = useState(
     currentMunicipality?.slug ?? 'lucainena'
   );
@@ -58,6 +61,8 @@ function LoginContent() {
     const nextUrl = searchParams.get('next');
     if (nextUrl && nextUrl.startsWith('/')) {
       router.push(nextUrl);
+    } else if (user.role === 'ADMIN' || user.role === 'DEPARTMENT') {
+      router.push('/admin');
     } else {
       router.push('/mi-perfil');
     }
@@ -79,6 +84,30 @@ function LoginContent() {
             password,
             municipalityId: activeMuniSlug,
             preferredLang: lang,
+            role: 'CITIZEN',
+          }),
+        });
+        const data = (await res.json()) as LoginResponse;
+        if (!res.ok || !data.user) {
+          setError(data.error || t('login.errorGeneric'));
+          return;
+        }
+        completeAuth(data.user);
+        return;
+      }
+
+      if (tab === 'ADMIN' && adminMode === 'REGISTER') {
+        const res = await fetch('/api/auth/register', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            name: name.trim(),
+            email: email.trim(),
+            password,
+            municipalityId: adminMunicipality,
+            preferredLang: lang,
+            role: 'ADMIN',
+            inviteCode: adminInviteCode.trim(),
           }),
         });
         const data = (await res.json()) as LoginResponse;
@@ -141,6 +170,10 @@ function LoginContent() {
     }
   }
 
+  const isRegistering =
+    (tab === 'CITIZEN' && citizenMode === 'REGISTER') ||
+    (tab === 'ADMIN' && adminMode === 'REGISTER');
+
   return (
     <div className="max-w-2xl mx-auto w-full flex flex-col gap-8">
       <section className="rounded-3xl bg-buganvilla text-tarjeta p-6 sm:p-8 shadow-sm a11y-card">
@@ -192,7 +225,7 @@ function LoginContent() {
 
       {/* Formulario principal */}
       <section className="rounded-3xl bg-tarjeta border border-superficie p-6 sm:p-8 shadow-sm flex flex-col gap-6 a11y-card">
-        {tab === 'CITIZEN' && (
+        {tab === 'CITIZEN' ? (
           <div className="flex flex-wrap gap-3">
             <button
               type="button"
@@ -223,6 +256,39 @@ function LoginContent() {
             >
               <UserPlus className="w-4 h-4" aria-hidden="true" />
               <span>{t('login.citizenRegister')}</span>
+            </button>
+          </div>
+        ) : (
+          <div className="flex flex-wrap gap-3">
+            <button
+              type="button"
+              onClick={() => {
+                setAdminMode('LOGIN');
+                setError(null);
+              }}
+              className={`flex-1 min-h-[48px] px-5 rounded-2xl font-semibold inline-flex items-center justify-center gap-2 border transition-colors ${
+                adminMode === 'LOGIN'
+                  ? 'bg-superficie text-tinta border-tinta/30 font-bold'
+                  : 'bg-arena/60 text-tinta/75 border-superficie hover:bg-superficie/50'
+              }`}
+            >
+              <LogIn className="w-4 h-4" aria-hidden="true" />
+              <span>Entrar como Administrador</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setAdminMode('REGISTER');
+                setError(null);
+              }}
+              className={`flex-1 min-h-[48px] px-5 rounded-2xl font-semibold inline-flex items-center justify-center gap-2 border transition-colors ${
+                adminMode === 'REGISTER'
+                  ? 'bg-superficie text-tinta border-tinta/30 font-bold'
+                  : 'bg-arena/60 text-tinta/75 border-superficie hover:bg-superficie/50'
+              }`}
+            >
+              <ShieldCheck className="w-4 h-4" aria-hidden="true" />
+              <span>Registrar nuevo Admin (con código)</span>
             </button>
           </div>
         )}
@@ -258,7 +324,7 @@ function LoginContent() {
             </div>
           )}
 
-          {tab === 'CITIZEN' && citizenMode === 'REGISTER' && (
+          {isRegistering && (
             <div className="flex flex-col gap-2">
               <label htmlFor="register-name" className="font-semibold text-tinta">
                 {t('login.nameLabel')}
@@ -269,7 +335,11 @@ function LoginContent() {
                 required
                 value={name}
                 onChange={(e) => setName(e.target.value)}
-                placeholder={t('login.namePlaceholder')}
+                placeholder={
+                  tab === 'ADMIN'
+                    ? 'Ej: Responsable Atención Municipal'
+                    : t('login.namePlaceholder')
+                }
                 className="min-h-[52px] rounded-2xl bg-arena border border-superficie px-4 text-base text-tinta focus:outline-none focus:ring-2 focus:ring-buganvilla"
               />
             </div>
@@ -307,6 +377,30 @@ function LoginContent() {
             />
           </div>
 
+          {tab === 'ADMIN' && adminMode === 'REGISTER' && (
+            <div className="flex flex-col gap-2 rounded-2xl bg-[#FDF5DF] border border-solAlmeria p-4">
+              <label
+                htmlFor="admin-invite-code"
+                className="font-semibold text-tinta flex items-center gap-2 text-sm"
+              >
+                <ShieldCheck className="w-4 h-4 text-terracota" aria-hidden="true" />
+                <span>Código de invitación municipal (requerido para alta Admin)</span>
+              </label>
+              <input
+                id="admin-invite-code"
+                type="text"
+                required
+                value={adminInviteCode}
+                onChange={(e) => setAdminInviteCode(e.target.value.toUpperCase())}
+                placeholder="Ej: AYTO-2026"
+                className="min-h-[48px] rounded-xl bg-tarjeta border border-superficie px-4 text-base font-heading font-bold tracking-wider text-tinta focus:outline-none focus:ring-2 focus:ring-tinta"
+              />
+              <p className="text-xs text-tinta/75">
+                Para pruebas del jurado puedes usar el código oficial <code>AYTO-2026</code>.
+              </p>
+            </div>
+          )}
+
           <button
             type="submit"
             disabled={loading}
@@ -323,7 +417,9 @@ function LoginContent() {
             )}
             <span>
               {tab === 'ADMIN'
-                ? t('login.submitAdmin')
+                ? adminMode === 'REGISTER'
+                  ? 'Crear cuenta de Administrador Municipal'
+                  : t('login.submitAdmin')
                 : citizenMode === 'REGISTER'
                 ? t('login.submitRegister', { municipality: activeMuniName })
                 : t('login.submitLogin')}

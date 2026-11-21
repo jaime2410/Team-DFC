@@ -212,15 +212,26 @@ export async function processChatMessage(input: ChatInput): Promise<ChatResult> 
 
   const contextBlock =
     chunks.length > 0
-      ? chunks.map((c, i) => `[Fuente ${i + 1}: ${c.filename}]\n${c.content}`).join('\n\n')
+      ? chunks
+          .map(
+            (c, i) =>
+              `[Documento ${i + 1}]\n` +
+              `Título: ${c.filename}\n` +
+              `Categoría: ${c.category ?? 'normativa_municipal'}\n` +
+              `Fuente oficial: ${c.sourceUrl ?? 'Registro Municipal Oficial'}\n` +
+              `Contenido:\n${c.content}`
+          )
+          .join('\n\n---\n\n')
       : 'No hay documentos oficiales relevantes para esta consulta.';
 
-  // 4. Llamada a IA con ventana deslizante y límites estrictos
+  // 4. Llamada a IA con prompt municipal estricto (información contrastada con Código SIA, Leyes BOE y Sede Electrónica)
   const systemPrompt =
-    `Eres el asistente virtual del Ayuntamiento de ${municipality.name} (${municipality.province}). ` +
-    `Responde de forma clara, breve y cercana, en el idioma "${LANG_NAMES[lang]}", ` +
-    `basándote solo en el contexto oficial del municipio. Cita el documento fuente cuando aplique. ` +
-    `Si no tienes datos suficientes, indícalo y sugiere hablar con atención ciudadana.`;
+    `Eres el asistente virtual oficial de información ciudadana del Ayuntamiento de ${municipality.name} (${municipality.province}). ` +
+    `Responde siempre en el idioma "${LANG_NAMES[lang]}" aplicando estas reglas estrictas de rigor municipal:\n` +
+    `1. Basa tus respuestas ÚNICAMENTE en la documentación oficial proporcionada en el CONTEXTO OFICIAL.\n` +
+    `2. Nunca inventes tasas, importes, plazos, teléfonos, direcciones, horarios ni requisitos que no aparezcan explícitamente en el contexto.\n` +
+    `3. Cuando exista un trámite oficial de la Sede Electrónica o normativa legal relacionada, indica claramente su nombre exacto, Código SIA (si figura en el contexto), los requisitos/plazos disponibles, la ley aplicable (ej. Ley 39/2015, Ley 7/1985, etc.) y la Fuente oficial (URL) para que el ciudadano pueda verificarlo o iniciarlo.\n` +
+    `4. Si la información solicitada no consta en el contexto oficial, dilo con total transparencia y orienta al vecino a pulsar "Hablar con una persona" o contactar con el Ayuntamiento de ${municipality.name}.`;
 
   const userPrompt = `CONTEXTO OFICIAL:\n${contextBlock}\n\nPREGUNTA DEL VECINO:\n${message}`;
 

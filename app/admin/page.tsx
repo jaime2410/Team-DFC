@@ -219,6 +219,7 @@ interface RagDocItem {
   id: string;
   filename: string;
   doc_type: string;
+  category?: string | null;
   source_url: string | null;
   status: 'VIGENTE' | 'DEROGADA';
   valid_until: string | null;
@@ -386,8 +387,20 @@ export default function AdminPage() {
   const [escalatedList, setEscalatedList] = useState<EscalatedConsultationItem[]>([]);
   const [humanDrafts, setHumanDrafts] = useState<Record<string, string>>({});
 
-  // Pestaña 3: Base de Conocimiento (RAG + Vigencia)
+  // Pestaña 3: Base de Conocimiento (RAG + Vigencia + Scraping)
   const [ragDocs, setRagDocs] = useState<RagDocItem[]>([]);
+  const [ragVectorStats, setRagVectorStats] = useState<{
+    totalChunks: number;
+    vectorizedChunks: number;
+    embeddingModel: string;
+  }>({
+    totalChunks: 0,
+    vectorizedChunks: 0,
+    embeddingModel: 'gemini-embedding-001',
+  });
+  const [scrapingRag, setScrapingRag] = useState(false);
+  const [customSedeUrl, setCustomSedeUrl] = useState('');
+  const [ragCategoryFilter, setRagCategoryFilter] = useState('ALL');
   const [uploadingDoc, setUploadingDoc] = useState(false);
   const [ragUploadDate, setRagUploadDate] = useState('2027-12-31');
   const [ragTextTitle, setRagTextTitle] = useState('');
@@ -395,7 +408,16 @@ export default function AdminPage() {
   const [ragTextBody, setRagTextBody] = useState('');
   const [ragSearchQuery, setRagSearchQuery] = useState('');
   const [ragSearchResults, setRagSearchResults] = useState<
-    Array<{ chunkId: string; filename: string; content: string; score: number }>
+    Array<{
+      chunkId: string;
+      filename: string;
+      category?: string | null;
+      content: string;
+      score: number;
+      vectorScore?: number | null;
+      retrievalMethod?: string;
+      sourceUrl?: string | null;
+    }>
   >([]);
 
   // Pestaña 4: Avisos por Calle y Ayudas
@@ -459,8 +481,18 @@ export default function AdminPage() {
       setSuggestedFaqs(d.suggestedFaqs ?? []);
     }
     if (ragRes.ok) {
-      const d = (await ragRes.json()) as { documents: RagDocItem[] };
+      const d = (await ragRes.json()) as {
+        documents: RagDocItem[];
+        vectorStats?: {
+          totalChunks: number;
+          vectorizedChunks: number;
+          embeddingModel: string;
+        };
+      };
       setRagDocs(d.documents ?? []);
+      if (d.vectorStats) {
+        setRagVectorStats(d.vectorStats);
+      }
     }
     if (alertRes.ok) {
       const d = (await alertRes.json()) as { alerts: StreetAlertItem[] };
@@ -827,6 +859,49 @@ export default function AdminPage() {
     if (res.ok) {
       const d = (await res.json()) as { chunks: typeof ragSearchResults };
       setRagSearchResults(d.chunks ?? []);
+    }
+  }
+
+  async function handleRunMunicipalScraper(mode: 'official_sync' | 'live_scrape') {
+    setScrapingRag(true);
+    setBanner(null);
+    try {
+      const res = await fetch('/api/admin/rag/scrape', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          mode,
+          customSedeUrl: customSedeUrl.trim() || undefined,
+          validUntil: ragUploadDate || undefined,
+        }),
+      });
+      const data = (await res.json()) as {
+        ok?: boolean;
+        documentsIndexed?: number;
+        chunksIndexed?: number;
+        vectorsGenerated?: number;
+        tramitesCount?: number;
+        lawsCount?: number;
+        error?: string;
+      };
+      if (res.ok && data.ok) {
+        setBanner(
+          `Scraping y vectorización completados (${
+            mode === 'live_scrape' ? 'En vivo' : 'Catálogo Oficial'
+          }): ${data.documentsIndexed ?? 0} documentos (${
+            data.tramitesCount ?? 0
+          } trámites SIA + ${data.lawsCount ?? 0} leyes BOE), ${
+            data.chunksIndexed ?? 0
+          } fragmentos y ${
+            data.vectorsGenerated ?? 0
+          } vectores gemini-embedding-001 en pgvector.`
+        );
+        await loadAllAdminData();
+      } else {
+        setBanner(data.error || 'No se pudo completar el scraping.');
+      }
+    } finally {
+      setScrapingRag(false);
     }
   }
 
@@ -1888,14 +1963,87 @@ export default function AdminPage() {
         </section>
       )}
 
-      {/* PESTAÑA 3: BASE DE CONOCIMIENTO OFICIAL (RAG pgvector + VIGENCIA) */}
+      {/* PESTAÑA 3: BASE DE CONOCIMIENTO OFICIAL (RAG pgvector + VIGENCIA + SCRAPING) */}
       {activeTab === 'RAG' && (
         <section className="flex flex-col gap-8">
+          {/* Panel de Scraping Oficial del Ayuntamiento, Sede Electrónica (SIA) y Leyes BOE */}
+          <div className="rounded-3xl bg-tinta text-tarjeta p-6 sm:p-8 flex flex-col gap-5 shadow-sm a11y-card">
+            <div className="flex flex-wrap items-start justify-between gap-4">
+              <div>
+                <span className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-solAlmeria text-tinta text-xs font-bold uppercase tracking-wide mb-2">
+                  <Sparkles className="w-3.5 h-3.5" />
+                  Scraping Municipal + Leyes BOE + Embeddings pgvector
+                </span>
+                <h2 className="font-heading font-bold text-2xl">
+                  Sincronizador de Sede Electrónica, Trámites SIA y Legislación Local ({authUser.municipalityName})
+                </h2>
+                <p className="text-sm text-tarjeta/80 mt-1 max-w-3xl">
+                  Extrae automáticamente las 16 secciones normativas de la Sede Electrónica, los 67 trámites del catálogo oficial (con Código SIA, requisitos y silencio administrativo) y el Compendio de Leyes BOE (Ley 39/2015, Ley 40/2015, Ley 7/1985 LRBRL, Haciendas Locales, Subvenciones, LISTA y LOPDGDD), generando vectores de 768 dimensiones con <code>gemini-embedding-001</code> en lotes (<code>batchEmbedContents</code>).
+                </p>
+              </div>
+              <div className="rounded-2xl bg-tarjeta/10 border border-tarjeta/20 px-4 py-3 text-right shrink-0">
+                <p className="text-xs font-bold uppercase text-solAlmeria">
+                  Estado Base Vectorial (pgvector HNSW)
+                </p>
+                <p className="font-heading font-bold text-xl text-tarjeta mt-0.5">
+                  {ragVectorStats.vectorizedChunks} / {ragVectorStats.totalChunks} chunks con vector
+                </p>
+                <p className="text-xs text-tarjeta/75">
+                  Modelo: {ragVectorStats.embeddingModel} (768d)
+                </p>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-3 items-center">
+              <input
+                type="url"
+                value={customSedeUrl}
+                onChange={(e) => setCustomSedeUrl(e.target.value)}
+                placeholder={`URL Sede Electrónica (por defecto: https://sede.${
+                  authUser.municipalitySlug === 'lucainena'
+                    ? 'lucainenadelastorres'
+                    : authUser.municipalitySlug
+                }.es)`}
+                className="min-h-[48px] rounded-2xl bg-tarjeta text-tinta px-4 text-sm font-medium"
+              />
+              <button
+                type="button"
+                disabled={scrapingRag}
+                onClick={() => void handleRunMunicipalScraper('official_sync')}
+                className="min-h-[48px] px-5 rounded-2xl bg-verdeCabo text-tarjeta font-heading font-bold text-sm inline-flex items-center justify-center gap-2 hover:opacity-95 transition-opacity disabled:opacity-60"
+              >
+                {scrapingRag ? (
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                ) : (
+                  <Sparkles className="w-4 h-4" />
+                )}
+                <span>
+                  {scrapingRag
+                    ? 'Indexando y vectorizando lotes...'
+                    : '1. Sincronizar Catálogo Oficial + 67 Trámites SIA + Leyes BOE'}
+                </span>
+              </button>
+              <button
+                type="button"
+                disabled={scrapingRag}
+                onClick={() => void handleRunMunicipalScraper('live_scrape')}
+                className="min-h-[48px] px-5 rounded-2xl bg-solAlmeria text-tinta font-heading font-bold text-sm inline-flex items-center justify-center gap-2 hover:opacity-95 transition-opacity disabled:opacity-60"
+              >
+                {scrapingRag ? (
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                ) : (
+                  <RefreshCw className="w-4 h-4" />
+                )}
+                <span>2. Scraping en Vivo Sede Electrónica + Web Municipal</span>
+              </button>
+            </div>
+          </div>
+
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-            {/* Subida de archivo .pdf, .txt, .md */}
+            {/* Subida de archivo .pdf, .txt, .md, .json */}
             <div className="rounded-3xl bg-tarjeta border border-superficie p-6 flex flex-col gap-4 a11y-card">
               <h2 className="font-heading font-bold text-xl text-tinta">
-                Subir Documento Oficial (.pdf, .txt, .md)
+                Subir Documento Oficial (.pdf, .txt, .md, .json)
               </h2>
               <div className="flex flex-col gap-1.5">
                 <label className="text-xs font-bold uppercase text-tinta/70">
@@ -1913,11 +2061,11 @@ export default function AdminPage() {
                 <span>
                   {uploadingDoc
                     ? 'Indexando fragmentos y vectores en Supabase...'
-                    : 'Seleccionar o arrastrar archivo (.pdf, .txt, .md)'}
+                    : 'Seleccionar o arrastrar archivo (.pdf, .txt, .md, .json)'}
                 </span>
                 <input
                   type="file"
-                  accept=".pdf,.txt,.md"
+                  accept=".pdf,.txt,.md,.json"
                   onChange={handleFileUpload}
                   className="hidden"
                 />
@@ -1937,14 +2085,14 @@ export default function AdminPage() {
                   type="text"
                   value={ragTextTitle}
                   onChange={(e) => setRagTextTitle(e.target.value)}
-                  placeholder="Título (ej: Bando_Fiestas_2026.txt)"
+                  placeholder="Título (ej: Ordenanza_Fiscal_IBI_2026)"
                   className="min-h-[44px] rounded-xl bg-arena border border-superficie px-3 text-sm"
                 />
                 <input
                   type="url"
                   value={ragTextUrl}
                   onChange={(e) => setRagTextUrl(e.target.value)}
-                  placeholder="URL oficial (opcional)"
+                  placeholder="URL oficial de Sede o BOE (opcional)"
                   className="min-h-[44px] rounded-xl bg-arena border border-superficie px-3 text-sm"
                 />
               </div>
@@ -1952,7 +2100,7 @@ export default function AdminPage() {
                 rows={3}
                 value={ragTextBody}
                 onChange={(e) => setRagTextBody(e.target.value)}
-                placeholder="Pega aquí el texto oficial de la ordenanza, bando o trámite..."
+                placeholder="Pega aquí el texto oficial de la ordenanza, bando o trámite (o déjalo vacío si indicas una URL oficial para hacer scraping)..."
                 className="rounded-xl bg-arena border border-superficie p-3 text-sm"
               />
               <button
@@ -1965,84 +2113,164 @@ export default function AdminPage() {
             </form>
           </div>
 
-          {/* Listado de documentos con estado VIGENTE / DEROGADA y contador de usos */}
+          {/* Listado de documentos con estado VIGENTE / DEROGADA, filtro por categoría y contador de usos */}
           <div className="rounded-3xl bg-tarjeta border border-superficie p-6 sm:p-8 flex flex-col gap-4 a11y-card">
-            <h2 className="font-heading font-bold text-2xl text-tinta">
-              Documentos Indexados en {authUser.municipalityName} ({ragDocs.length})
-            </h2>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              {ragDocs.map((doc) => (
-                <div
-                  key={doc.id}
-                  className={`rounded-2xl p-5 border flex flex-col justify-between gap-4 ${
-                    doc.status === 'DEROGADA'
-                      ? 'bg-superficie/40 border-terracota/40 opacity-80'
-                      : 'bg-arena border-superficie'
-                  }`}
-                >
-                  <div>
-                    <div className="flex flex-wrap items-center justify-between gap-2">
-                      <span
-                        className={`px-3 py-1 rounded-full text-xs font-bold ${
+            <div className="flex flex-wrap items-center justify-between gap-4">
+              <h2 className="font-heading font-bold text-2xl text-tinta">
+                Documentos Indexados en {authUser.municipalityName} ({ragDocs.length})
+              </h2>
+              <div className="flex flex-wrap gap-2">
+                {[
+                  { key: 'ALL', label: `Todos (${ragDocs.length})` },
+                  {
+                    key: 'TRAMITES',
+                    label: `Trámites SIA (${
+                      ragDocs.filter((d) => d.category === 'tramite_sede' || d.doc_type === 'SIA').length
+                    })`,
+                  },
+                  {
+                    key: 'LEYES',
+                    label: `Leyes BOE (${
+                      ragDocs.filter((d) => d.category?.startsWith('ley_boe') || d.doc_type === 'BOE').length
+                    })`,
+                  },
+                  {
+                    key: 'SEDE',
+                    label: `Sede y Ordenanzas (${
+                      ragDocs.filter(
+                        (d) =>
+                          d.category !== 'tramite_sede' &&
+                          !d.category?.startsWith('ley_boe') &&
+                          d.doc_type !== 'SIA' &&
+                          d.doc_type !== 'BOE'
+                      ).length
+                    })`,
+                  },
+                ].map((f) => (
+                  <button
+                    key={f.key}
+                    type="button"
+                    onClick={() => setRagCategoryFilter(f.key)}
+                    className={`px-3.5 py-1.5 rounded-xl text-xs font-bold transition-colors ${
+                      ragCategoryFilter === f.key
+                        ? 'bg-tinta text-tarjeta'
+                        : 'bg-arena text-tinta hover:bg-superficie'
+                    }`}
+                  >
+                    {f.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 max-h-[640px] overflow-y-auto pr-1">
+              {ragDocs
+                .filter((doc) => {
+                  if (ragCategoryFilter === 'TRAMITES') {
+                    return doc.category === 'tramite_sede' || doc.doc_type === 'SIA';
+                  }
+                  if (ragCategoryFilter === 'LEYES') {
+                    return Boolean(doc.category?.startsWith('ley_boe') || doc.doc_type === 'BOE');
+                  }
+                  if (ragCategoryFilter === 'SEDE') {
+                    return (
+                      doc.category !== 'tramite_sede' &&
+                      !doc.category?.startsWith('ley_boe') &&
+                      doc.doc_type !== 'SIA' &&
+                      doc.doc_type !== 'BOE'
+                    );
+                  }
+                  return true;
+                })
+                .map((doc) => (
+                  <div
+                    key={doc.id}
+                    className={`rounded-2xl p-5 border flex flex-col justify-between gap-4 ${
+                      doc.status === 'DEROGADA'
+                        ? 'bg-superficie/40 border-terracota/40 opacity-80'
+                        : 'bg-arena border-superficie'
+                    }`}
+                  >
+                    <div>
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <div className="flex flex-wrap items-center gap-1.5">
+                          <span
+                            className={`px-3 py-1 rounded-full text-xs font-bold ${
+                              doc.status === 'DEROGADA'
+                                ? 'bg-terracota text-tarjeta'
+                                : 'bg-verdeCabo text-tarjeta'
+                            }`}
+                          >
+                            {doc.status}
+                          </span>
+                          {doc.category && (
+                            <span className="px-2.5 py-0.5 rounded-full bg-superficie text-tinta text-xs font-semibold">
+                              {doc.category}
+                            </span>
+                          )}
+                        </div>
+                        <span className="text-xs font-bold text-azulMed">
+                          Usado en {doc.usage_count} respuestas · {doc.chunk_count} chunks
+                        </span>
+                      </div>
+                      <h3 className="font-heading font-bold text-lg text-tinta mt-2">
+                        {doc.filename}
+                      </h3>
+                      <p className="text-xs text-tinta/70 mt-1">
+                        Tipo: {doc.doc_type} · {doc.char_count} caracteres
+                        {doc.valid_until ? ` · Vigente hasta: ${doc.valid_until}` : ''}
+                      </p>
+                      {doc.source_url && (
+                        <a
+                          href={doc.source_url}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="inline-block text-xs font-bold text-azulMed underline mt-1 truncate max-w-full"
+                        >
+                          Fuente oficial: {doc.source_url} ↗
+                        </a>
+                      )}
+                    </div>
+
+                    <div className="flex items-center gap-3">
+                      <button
+                        type="button"
+                        onClick={() => void handleToggleDocStatus(doc)}
+                        className={`flex-1 min-h-[40px] px-4 rounded-xl text-xs font-bold transition-colors ${
                           doc.status === 'DEROGADA'
-                            ? 'bg-terracota text-tarjeta'
-                            : 'bg-verdeCabo text-tarjeta'
+                            ? 'bg-verdeCabo text-tarjeta'
+                            : 'bg-solAlmeria text-tinta'
                         }`}
                       >
-                        {doc.status}
-                      </span>
-                      <span className="text-xs font-bold text-azulMed">
-                        Usado en {doc.usage_count} respuestas · {doc.chunk_count} chunks
-                      </span>
+                        {doc.status === 'DEROGADA'
+                          ? 'Reactivar vigencia (1 clic)'
+                          : 'Derogar documento (1 clic)'}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => void handleDeleteDoc(doc.id)}
+                        className="p-2.5 rounded-xl bg-terracota/15 text-terracota hover:bg-terracota hover:text-tarjeta transition-colors"
+                        aria-label="Eliminar documento"
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </button>
                     </div>
-                    <h3 className="font-heading font-bold text-lg text-tinta mt-2">
-                      {doc.filename}
-                    </h3>
-                    <p className="text-xs text-tinta/70 mt-1">
-                      Tipo: {doc.doc_type} · {doc.char_count} caracteres
-                      {doc.valid_until ? ` · Vigente hasta: ${doc.valid_until}` : ''}
-                    </p>
                   </div>
-
-                  <div className="flex items-center gap-3">
-                    <button
-                      type="button"
-                      onClick={() => void handleToggleDocStatus(doc)}
-                      className={`flex-1 min-h-[40px] px-4 rounded-xl text-xs font-bold transition-colors ${
-                        doc.status === 'DEROGADA'
-                          ? 'bg-verdeCabo text-tarjeta'
-                          : 'bg-solAlmeria text-tinta'
-                      }`}
-                    >
-                      {doc.status === 'DEROGADA'
-                        ? 'Reactivar vigencia (1 clic)'
-                        : 'Derogar documento (1 clic)'}
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => void handleDeleteDoc(doc.id)}
-                      className="p-2.5 rounded-xl bg-terracota/15 text-terracota hover:bg-terracota hover:text-tarjeta transition-colors"
-                      aria-label="Eliminar documento"
-                    >
-                      <Trash2 className="w-4 h-4" />
-                    </button>
-                  </div>
-                </div>
-              ))}
+                ))}
             </div>
           </div>
 
           {/* Buscador en vivo RAG */}
           <div className="rounded-3xl bg-tarjeta border border-superficie p-6 sm:p-8 flex flex-col gap-4 a11y-card">
             <h2 className="font-heading font-bold text-xl text-tinta">
-              Probar Recuperación RAG en Directo (solo documentos VIGENTES)
+              Probar Recuperación RAG Híbrida en Directo (pgvector gemini-embedding-001 + FTS)
             </h2>
             <form onSubmit={handleRagLiveSearch} className="flex gap-3">
               <input
                 type="text"
                 value={ragSearchQuery}
                 onChange={(e) => setRagSearchQuery(e.target.value)}
-                placeholder="Ej: bonificación IBI familia numerosa o recogida de muebles..."
+                placeholder="Ej: alta de suministro de agua potable, Ley 39/2015 plazos, SIA 3318987 o bonificación IBI..."
                 className="flex-1 min-h-[48px] rounded-2xl bg-arena border border-superficie px-4 text-sm"
               />
               <button
@@ -2061,11 +2289,30 @@ export default function AdminPage() {
                     key={ch.chunkId}
                     className="rounded-2xl bg-arena border border-superficie p-4"
                   >
-                    <div className="flex items-center justify-between text-xs font-bold text-verdeCabo mb-1">
-                      <span>{ch.filename}</span>
-                      <span>Score: {ch.score}</span>
+                    <div className="flex flex-wrap items-center justify-between gap-2 text-xs font-bold text-verdeCabo mb-1.5">
+                      <span>
+                        {ch.filename}
+                        {ch.category ? ` (${ch.category})` : ''}
+                      </span>
+                      <span>
+                        Método: {(ch.retrievalMethod ?? 'hybrid').toUpperCase()} · Score:{' '}
+                        {ch.score}
+                        {typeof ch.vectorScore === 'number'
+                          ? ` (Coseno vector: ${ch.vectorScore})`
+                          : ''}
+                      </span>
                     </div>
-                    <p className="text-sm text-tinta/85">{ch.content}</p>
+                    {ch.sourceUrl && (
+                      <a
+                        href={ch.sourceUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="inline-block text-xs font-semibold text-azulMed underline mb-2"
+                      >
+                        {ch.sourceUrl} ↗
+                      </a>
+                    )}
+                    <p className="text-sm text-tinta/85 whitespace-pre-line">{ch.content}</p>
                   </div>
                 ))}
               </div>

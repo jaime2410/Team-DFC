@@ -5,8 +5,10 @@ import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
 import {
   AlertTriangle,
+  Bot,
   ExternalLink,
   FileText,
+  Loader2,
   Mic,
   MicOff,
   PhoneCall,
@@ -26,9 +28,12 @@ interface RagSourceDetail {
   dateLabel: string;
 }
 
+type MessageOrigin = 'voice' | 'text';
+
 interface ChatMessage {
   role: 'user' | 'assistant';
   content: string;
+  origin?: MessageOrigin;
   userQuestion?: string;
   consultationId?: string;
   providerUsed?: string;
@@ -70,11 +75,15 @@ function AssistantContent() {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
+  const [voiceAutoSending, setVoiceAutoSending] = useState(false);
   const [escalatingIdx, setEscalatingIdx] = useState<number | null>(null);
   const [listening, setListening] = useState(false);
   const [speakingIndex, setSpeakingIndex] = useState<number | null>(null);
   const [voiceSupported, setVoiceSupported] = useState(false);
+
   const recognitionRef = useRef<SpeechRecognitionLike | null>(null);
+  const voiceTranscriptRef = useRef<string>('');
+  const autoSendTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
 
   const muniSlug = currentMunicipality?.slug ?? 'lucainena';
@@ -92,10 +101,11 @@ function AssistantContent() {
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [messages, loading]);
+  }, [messages, loading, voiceAutoSending]);
 
   useEffect(() => {
     return () => {
+      if (autoSendTimerRef.current) clearTimeout(autoSendTimerRef.current);
       recognitionRef.current?.stop();
       if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
         window.speechSynthesis.cancel();
@@ -103,14 +113,43 @@ function AssistantContent() {
     };
   }, []);
 
+  const stopSpeaking = useCallback(() => {
+    if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
+      window.speechSynthesis.cancel();
+    }
+    setSpeakingIndex(null);
+  }, []);
+
+  const speakText = useCallback(
+    (index: number, text: string) => {
+      if (typeof window === 'undefined' || !('speechSynthesis' in window)) return;
+      window.speechSynthesis.cancel();
+      const utter = new SpeechSynthesisUtterance(text);
+      utter.lang = SPEECH_LANGS[lang] ?? 'es-ES';
+      utter.onend = () => setSpeakingIndex(null);
+      utter.onerror = () => setSpeakingIndex(null);
+      setSpeakingIndex(index);
+      window.speechSynthesis.speak(utter);
+    },
+    [lang]
+  );
+
   const sendMessage = useCallback(
-    async (text: string) => {
+    async (text: string, origin: MessageOrigin = 'text') => {
       const clean = text.trim();
       if (!clean || loading) return;
 
+      if (autoSendTimerRef.current) {
+        clearTimeout(autoSendTimerRef.current);
+        autoSendTimerRef.current = null;
+      }
+      setVoiceAutoSending(false);
+
       const history = messages.slice(-4).map((m) => ({ role: m.role, content: m.content }));
-      setMessages((prev) => [...prev, { role: 'user', content: clean }]);
+      const nextAssistantIndex = messages.length + 1;
+      setMessages((prev) => [...prev, { role: 'user', content: clean, origin }]);
       setInput('');
+      voiceTranscriptRef.current = '';
       setLoading(true);
 
       try {
@@ -141,11 +180,14 @@ function AssistantContent() {
           error?: string;
         };
         if (!res.ok || !data.answer) throw new Error(data.error || 'error');
+
+        const answerText = data.answer as string;
         setMessages((prev) => [
           ...prev,
           {
             role: 'assistant',
-            content: data.answer as string,
+            content: answerText,
+            origin,
             userQuestion: clean,
             consultationId: data.consultationId,
             providerUsed: data.providerUsed,
@@ -160,13 +202,21 @@ function AssistantContent() {
             emergency112Alert: data.emergency112Alert,
           },
         ]);
+
+        // Si el mensaje entró por micrófono (voz), reproducir respuesta automáticamente en voz alta
+        if (origin === 'voice') {
+          speakText(nextAssistantIndex, answerText);
+        }
       } catch {
-        setMessages((prev) => [...prev, { role: 'assistant', content: t('assistant.error') }]);
+        setMessages((prev) => [
+          ...prev,
+          { role: 'assistant', content: t('assistant.error'), origin },
+        ]);
       } finally {
         setLoading(false);
       }
     },
-    [loading, messages, muniSlug, lang, t]
+    [loading, messages, muniSlug, lang, t, speakText]
   );
 
   async function handleEscalateToHuman(index: number, msg: ChatMessage) {
@@ -210,35 +260,49 @@ function AssistantContent() {
       | (new () => SpeechRecognitionLike)
       | undefined;
     if (!Ctor) return;
+
+    stopSpeaking();
+    voiceTranscriptRef.current = '';
     const rec = new Ctor();
     rec.lang = SPEECH_LANGS[lang] ?? 'es-ES';
     rec.interimResults = false;
     rec.continuous = false;
     rec.onresult = (e) => {
       const transcript = e.results[0]?.[0]?.transcript ?? '';
-      if (transcript) setInput((prev) => (prev ? `${prev} ${transcript}` : transcript));
+      if (transcript) {
+        const combined = voiceTranscriptRef.current
+          ? `${voiceTranscriptRef.current} ${transcript}`
+          : transcript;
+        voiceTranscriptRef.current = combined.trim();
+        setInput(voiceTranscriptRef.current);
+      }
     };
-    rec.onend = () => setListening(false);
-    rec.onerror = () => setListening(false);
+    rec.onend = () => {
+      setListening(false);
+      const captured = voiceTranscriptRef.current.trim();
+      if (captured) {
+        setVoiceAutoSending(true);
+        if (autoSendTimerRef.current) clearTimeout(autoSendTimerRef.current);
+        autoSendTimerRef.current = setTimeout(() => {
+          void sendMessage(captured, 'voice');
+        }, 1000);
+      }
+    };
+    rec.onerror = () => {
+      setListening(false);
+      setVoiceAutoSending(false);
+    };
     recognitionRef.current = rec;
     setListening(true);
     rec.start();
   }
 
   function toggleSpeak(index: number, text: string) {
-    if (!('speechSynthesis' in window)) return;
     if (speakingIndex === index) {
-      window.speechSynthesis.cancel();
-      setSpeakingIndex(null);
+      stopSpeaking();
       return;
     }
-    window.speechSynthesis.cancel();
-    const utter = new SpeechSynthesisUtterance(text);
-    utter.lang = SPEECH_LANGS[lang] ?? 'es-ES';
-    utter.onend = () => setSpeakingIndex(null);
-    utter.onerror = () => setSpeakingIndex(null);
-    setSpeakingIndex(index);
-    window.speechSynthesis.speak(utter);
+    speakText(index, text);
   }
 
   function badgeLabel(m: ChatMessage): string {
@@ -252,14 +316,27 @@ function AssistantContent() {
 
   return (
     <div className="flex flex-col gap-8 max-w-3xl mx-auto w-full">
-      <section className="rounded-3xl bg-verdeCabo text-tarjeta p-6 sm:p-8 a11y-card">
-        <h1 className="font-heading font-bold text-3xl">{t('assistant.title')}</h1>
-        <p className="mt-2 text-base sm:text-lg text-tarjeta/90 leading-relaxed">
-          {t('assistant.subtitle', { municipality: muniName })}
-        </p>
+      <section className="rounded-3xl bg-verdeCabo text-tarjeta p-6 sm:p-8 flex flex-col sm:flex-row sm:items-center justify-between gap-4 a11y-card">
+        <div>
+          <h1 className="font-heading font-bold text-3xl">{t('assistant.title')}</h1>
+          <p className="mt-2 text-base sm:text-lg text-tarjeta/90 leading-relaxed">
+            {t('assistant.subtitle', { municipality: muniName })}
+          </p>
+        </div>
+
+        {speakingIndex !== null && (
+          <button
+            type="button"
+            onClick={stopSpeaking}
+            className="min-h-[48px] px-5 rounded-2xl bg-terracota text-tarjeta font-heading font-bold text-sm inline-flex items-center gap-2 shadow-md shrink-0 animate-pulse"
+          >
+            <Square className="w-4 h-4 fill-current" aria-hidden="true" />
+            <span>Detener voz</span>
+          </button>
+        )}
       </section>
 
-      {messages.length === 0 && (
+      {messages.length === 0 && !loading && (
         <section className="flex flex-col gap-4">
           <h2 className="font-heading font-bold text-xl text-tinta">{t('assistant.faqTitle')}</h2>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -267,7 +344,7 @@ function AssistantContent() {
               <button
                 key={q}
                 type="button"
-                onClick={() => void sendMessage(q)}
+                onClick={() => void sendMessage(q, 'text')}
                 className="text-start min-h-[64px] rounded-3xl bg-tarjeta border border-superficie p-5 font-semibold text-tinta hover:bg-superficie/60 transition-colors a11y-card"
               >
                 {q}
@@ -350,14 +427,20 @@ function AssistantContent() {
                   <button
                     type="button"
                     onClick={() => toggleSpeak(i, m.content)}
-                    className="inline-flex items-center gap-2 min-h-[40px] px-4 rounded-full bg-verdeCabo/15 text-verdeCabo text-sm font-semibold hover:bg-verdeCabo/25 transition-colors"
+                    className={`inline-flex items-center gap-2 min-h-[40px] px-4 rounded-full text-sm font-semibold transition-colors ${
+                      speakingIndex === i
+                        ? 'bg-terracota text-tarjeta'
+                        : 'bg-verdeCabo/15 text-verdeCabo hover:bg-verdeCabo/25'
+                    }`}
                   >
                     {speakingIndex === i ? (
-                      <Square className="w-4 h-4" aria-hidden="true" />
+                      <Square className="w-4 h-4 fill-current" aria-hidden="true" />
                     ) : (
                       <Volume2 className="w-4 h-4" aria-hidden="true" />
                     )}
-                    <span>{t('assistant.listen')}</span>
+                    <span>
+                      {speakingIndex === i ? 'Detener voz' : t('assistant.listen')}
+                    </span>
                   </button>
 
                   {!m.suggestHumanEscalation && !m.escalatedMsg && (
@@ -425,9 +508,35 @@ function AssistantContent() {
           </div>
         ))}
 
+        {voiceAutoSending && !loading && (
+          <div
+            role="status"
+            className="self-end rounded-3xl bg-azulMed/15 border border-azulMed/40 px-5 py-3 text-sm font-semibold text-azulMed flex items-center gap-2 a11y-card"
+          >
+            <Loader2 className="w-4 h-4 animate-spin shrink-0" aria-hidden="true" />
+            <span>Voz detectada. Enviando automáticamente...</span>
+          </div>
+        )}
+
+        {/* Burbuja animada del asistente mientras procesa la petición */}
         {loading && (
-          <div className="self-start rounded-3xl bg-tarjeta border border-superficie p-5 text-tinta/70 a11y-card">
-            {t('assistant.thinking')}
+          <div
+            role="status"
+            aria-live="polite"
+            className="self-start max-w-[90%] rounded-3xl bg-tarjeta border-2 border-verdeCabo/40 p-5 shadow-sm flex items-center gap-3.5 text-tinta a11y-card"
+          >
+            <span className="w-10 h-10 rounded-2xl bg-verdeCabo/15 text-verdeCabo flex items-center justify-center shrink-0">
+              <Bot className="w-5 h-5 animate-bounce" aria-hidden="true" />
+            </span>
+            <div className="flex flex-col gap-1">
+              <p className="font-heading font-bold text-sm text-verdeCabo">
+                Consultando información oficial de {muniName}...
+              </p>
+              <div className="flex items-center gap-1.5 text-xs text-tinta/70">
+                <Loader2 className="w-3.5 h-3.5 animate-spin text-verdeCabo" aria-hidden="true" />
+                <span>{t('assistant.thinking')}</span>
+              </div>
+            </div>
           </div>
         )}
         <div ref={bottomRef} />
@@ -436,7 +545,7 @@ function AssistantContent() {
       <form
         onSubmit={(e) => {
           e.preventDefault();
-          void sendMessage(input);
+          void sendMessage(input, 'text');
         }}
         className="sticky bottom-4 rounded-3xl bg-tarjeta border border-superficie shadow-lg p-4 flex flex-col sm:flex-row gap-3 a11y-card"
       >
@@ -447,7 +556,14 @@ function AssistantContent() {
           id="assistant-input"
           type="text"
           value={input}
-          onChange={(e) => setInput(e.target.value)}
+          onChange={(e) => {
+            if (autoSendTimerRef.current) {
+              clearTimeout(autoSendTimerRef.current);
+              autoSendTimerRef.current = null;
+              setVoiceAutoSending(false);
+            }
+            setInput(e.target.value);
+          }}
           placeholder={t('assistant.placeholder')}
           className="flex-1 min-h-[52px] rounded-2xl bg-arena border border-superficie px-4 text-base text-tinta placeholder:text-tinta/50 focus:outline-none focus:ring-2 focus:ring-verdeCabo"
         />
@@ -459,7 +575,7 @@ function AssistantContent() {
               aria-pressed={listening}
               className={`min-h-[52px] px-5 rounded-2xl font-semibold inline-flex items-center justify-center gap-2 transition-colors ${
                 listening
-                  ? 'bg-terracota text-tarjeta'
+                  ? 'bg-terracota text-tarjeta animate-pulse'
                   : 'bg-superficie text-tinta hover:bg-superficie/80'
               }`}
             >

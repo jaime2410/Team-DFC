@@ -317,6 +317,13 @@ export default function MiPerfilPage() {
               <LogIn className="w-5 h-5" aria-hidden="true" />
               <span>{t('profile.guestLoginCta')}</span>
             </Link>
+            <Link
+              href="/"
+              className="min-h-[54px] px-6 rounded-2xl bg-tarjeta/20 text-tarjeta font-heading font-bold text-base inline-flex items-center justify-center gap-2 hover:bg-tarjeta/30 transition-colors"
+            >
+              <Home className="w-5 h-5" aria-hidden="true" />
+              <span>Volver al menú</span>
+            </Link>
           </div>
         </section>
 
@@ -373,6 +380,13 @@ export default function MiPerfilPage() {
         </div>
 
         <div className="flex flex-wrap items-center gap-3">
+          <Link
+            href="/"
+            className="min-h-[48px] px-5 rounded-2xl bg-tarjeta/20 hover:bg-tarjeta/30 text-tarjeta font-bold inline-flex items-center gap-2 transition-colors"
+          >
+            <Home className="w-5 h-5" aria-hidden="true" />
+            <span>Volver al menú</span>
+          </Link>
           {isAdmin && (
             <Link
               href="/admin"
@@ -396,10 +410,19 @@ export default function MiPerfilPage() {
       {saveSuccess && (
         <div
           role="status"
-          className="rounded-3xl bg-verdeCabo text-tarjeta p-5 font-semibold flex items-center gap-3 shadow-sm a11y-card"
+          className="rounded-3xl bg-verdeCabo text-tarjeta p-5 font-semibold flex flex-wrap items-center justify-between gap-4 shadow-sm a11y-card"
         >
-          <CheckCircle2 className="w-6 h-6 shrink-0" aria-hidden="true" />
-          <span>{t('profile.savedBanner')}</span>
+          <div className="flex items-center gap-3">
+            <CheckCircle2 className="w-6 h-6 shrink-0" aria-hidden="true" />
+            <span>{t('profile.savedBanner')}</span>
+          </div>
+          <Link
+            href="/"
+            className="min-h-[44px] px-5 rounded-2xl bg-tarjeta text-verdeCabo font-heading font-bold text-sm inline-flex items-center gap-2 hover:opacity-95 transition-opacity"
+          >
+            <Home className="w-4 h-4" aria-hidden="true" />
+            <span>Volver al menú</span>
+          </Link>
         </div>
       )}
 

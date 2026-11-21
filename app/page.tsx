@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useEffect, useMemo, useState } from 'react';
+import dynamic from 'next/dynamic';
 import Link from 'next/link';
 import {
   AlertTriangle,
@@ -9,6 +10,7 @@ import {
   CheckCircle2,
   ClipboardList,
   Gift,
+  Map,
   MapPin,
   MessageCircle,
   Search,
@@ -19,6 +21,14 @@ import { useTranslation } from '@/lib/i18n/I18nProvider';
 import { useMunicipality } from '@/lib/municipality/MunicipalityProvider';
 import { BoardCardItem, BoardDetailModal, BoardItemKind } from '@/components/BoardDetailModal';
 import { TrackIncidentModal } from '@/components/TrackIncidentModal';
+import type { PublicMapIncidentItem } from '@/components/PublicTownMap';
+
+const PublicTownMap = dynamic(() => import('@/components/PublicTownMap'), {
+  ssr: false,
+  loading: () => (
+    <div className="w-full h-80 rounded-3xl bg-superficie/70 animate-pulse" />
+  ),
+});
 
 interface PublicBoardPayload {
   municipality: {
@@ -26,6 +36,8 @@ interface PublicBoardPayload {
     slug: string;
     name: string;
     province: string;
+    centerLat?: number;
+    centerLng?: number;
   };
   streetAlerts: Array<{
     id: string;
@@ -53,6 +65,7 @@ interface PublicBoardPayload {
     department: string;
     internalNotes: string | null;
   }>;
+  publicMapIncidents?: PublicMapIncidentItem[];
   infoCards: Array<{
     id: string;
     title: string;
@@ -72,6 +85,7 @@ export default function HomePage() {
   const [board, setBoard] = useState<PublicBoardPayload | null>(null);
   const [loadingBoard, setLoadingBoard] = useState(true);
   const [activeFilter, setActiveFilter] = useState<FilterKey>('all');
+  const [showTownMap, setShowTownMap] = useState(false);
   const [selectedCard, setSelectedCard] = useState<BoardCardItem | null>(null);
   const [trackOpen, setTrackOpen] = useState(false);
 
@@ -306,14 +320,50 @@ export default function HomePage() {
         </Link>
       </section>
 
-      {/* Tablón Visual del Pueblo (Masonry estilo Pinterest) */}
+      {/* Tablón Visual del Pueblo (Masonry estilo Pinterest) + Mapa Público Anonimizado */}
       <section aria-labelledby="board-heading" className="flex flex-col gap-6 pt-2">
-        <div className="flex flex-col gap-2">
-          <h2 id="board-heading" className="font-heading font-bold text-2xl sm:text-3xl text-tinta">
-            {t('home.boardTitle', { municipality: muniName })}
-          </h2>
-          <p className="text-base text-tinta/75">{t('home.boardSubtitle')}</p>
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+          <div className="flex flex-col gap-2">
+            <h2 id="board-heading" className="font-heading font-bold text-2xl sm:text-3xl text-tinta">
+              {t('home.boardTitle', { municipality: muniName })}
+            </h2>
+            <p className="text-base text-tinta/75">{t('home.boardSubtitle')}</p>
+          </div>
+
+          <button
+            type="button"
+            aria-pressed={showTownMap}
+            onClick={() => setShowTownMap((prev) => !prev)}
+            className={`min-h-[48px] px-5 py-2.5 rounded-2xl font-heading font-bold text-sm sm:text-base inline-flex items-center justify-center gap-2 border transition-all shrink-0 a11y-card ${showTownMap
+                ? 'bg-azulMed text-tarjeta border-azulMed shadow-sm'
+                : 'bg-tarjeta text-tinta border-superficie hover:bg-superficie/70'
+              }`}
+          >
+            <Map className="w-5 h-5 shrink-0" aria-hidden="true" />
+            <span>{showTownMap ? 'Ocultar mapa del pueblo' : '🗺️ Mapa del pueblo'}</span>
+          </button>
         </div>
+
+        {showTownMap && (
+          <PublicTownMap
+            center={[
+              currentMunicipality?.center_lat ?? board?.municipality.centerLat ?? 37.0408,
+              currentMunicipality?.center_lng ?? board?.municipality.centerLng ?? -2.1995,
+            ]}
+            municipalitySlug={muniSlug}
+            municipalityName={muniName}
+            incidents={board?.publicMapIncidents ?? []}
+            onUpvoted={(incidentId, nextVotes) => {
+              if (!board?.publicMapIncidents) return;
+              setBoard({
+                ...board,
+                publicMapIncidents: board.publicMapIncidents.map((item) =>
+                  item.id === incidentId ? { ...item, upvotes: nextVotes } : item
+                ),
+              });
+            }}
+          />
+        )}
 
         {/* Chips grandes y espaciados */}
         <div className="flex flex-wrap gap-3" role="tablist" aria-label={t('home.boardTitle', { municipality: muniName })}>
@@ -326,11 +376,10 @@ export default function HomePage() {
                 role="tab"
                 aria-selected={active}
                 onClick={() => setActiveFilter(chip.key)}
-                className={`min-h-[44px] px-5 py-2.5 rounded-full text-sm sm:text-base font-semibold border transition-colors ${
-                  active
+                className={`min-h-[44px] px-5 py-2.5 rounded-full text-sm sm:text-base font-semibold border transition-colors ${active
                     ? 'bg-tinta text-tarjeta border-tinta shadow-sm'
                     : 'bg-tarjeta text-tinta border-superficie hover:bg-superficie/70'
-                }`}
+                  }`}
               >
                 {chip.label}
               </button>
@@ -358,28 +407,28 @@ export default function HomePage() {
                 card.kind === 'alerts'
                   ? 'bg-tarjeta border-2 border-terracota/35'
                   : card.kind === 'aids'
-                  ? 'bg-[#FDF5DF] border border-solAlmeria/70'
-                  : card.kind === 'resolved'
-                  ? 'bg-[#EAF6F3] border border-verdeCabo/40'
-                  : 'bg-superficie/80 border border-superficie';
+                    ? 'bg-[#FDF5DF] border border-solAlmeria/70'
+                    : card.kind === 'resolved'
+                      ? 'bg-[#EAF6F3] border border-verdeCabo/40'
+                      : 'bg-superficie/80 border border-superficie';
 
               const badgeTheme =
                 card.kind === 'alerts'
                   ? 'bg-terracota/15 text-terracota'
                   : card.kind === 'aids'
-                  ? 'bg-solAlmeria text-tinta'
-                  : card.kind === 'resolved'
-                  ? 'bg-verdeCabo text-tarjeta'
-                  : 'bg-azulMed/15 text-azulMed';
+                    ? 'bg-solAlmeria text-tinta'
+                    : card.kind === 'resolved'
+                      ? 'bg-verdeCabo text-tarjeta'
+                      : 'bg-azulMed/15 text-azulMed';
 
               const KindIcon =
                 card.kind === 'alerts'
                   ? AlertTriangle
                   : card.kind === 'aids'
-                  ? Gift
-                  : card.kind === 'resolved'
-                  ? CheckCircle2
-                  : ClipboardList;
+                    ? Gift
+                    : card.kind === 'resolved'
+                      ? CheckCircle2
+                      : ClipboardList;
 
               return (
                 <button
